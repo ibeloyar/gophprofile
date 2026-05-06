@@ -8,12 +8,7 @@ import (
 )
 
 func main() {
-	cfg, err := config.ReadConfig()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if err := app.Run(cfg); err != nil {
+	if err := app.Run(config.MustReadConfig()); err != nil {
 		log.Fatal(err)
 	}
 }

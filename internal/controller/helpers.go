@@ -1,12 +1,15 @@
-package service
+package controller
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"image"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/ibeloyar/gophprofile/internal/model"
 	"go.uber.org/zap"
 )
 
@@ -61,4 +64,65 @@ func writeJSON(w http.ResponseWriter, lg *zap.SugaredLogger, data interface{}, s
 	}
 
 	w.Write(response)
+}
+
+var (
+	ErrFileRequired      = errors.New("file required")
+	ErrFileTooLarge      = errors.New("file too large")
+	ErrFileInvalidFormat = errors.New("invalid file format")
+)
+
+// readAvatarFile -
+func readAvatarFile(r *http.Request) (*model.AvatarFile, error) {
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return nil, ErrFileRequired
+	}
+	defer file.Close()
+
+	if err := r.ParseMultipartForm(maxFileSize); err != nil {
+		return nil, ErrFileTooLarge
+	}
+
+	contentType := header.Header.Get("Content-Type")
+	if !strings.Contains(supportedFormats, contentType) {
+		return nil, ErrFileInvalidFormat
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return nil, err
+	}
+
+	if header.Size > maxFileSize || int64(len(data)) > maxFileSize {
+		return nil, ErrFileTooLarge
+	}
+
+	// Перематываем file в начало для getDimensions
+	file.Seek(0, 0)
+	dimensions, err := getDimensions(file)
+	if err != nil {
+		return nil, err
+	}
+
+	return &model.AvatarFile{
+		ContentType: contentType,
+		Filename:    header.Filename,
+		Width:       dimensions.Width,
+		Height:      dimensions.Height,
+		Size:        header.Size,
+		Data:        data,
+	}, nil
+}
+
+// getDimensions -
+func getDimensions(r io.Reader) (*model.AvatarMetaDimensions, error) {
+	config, _, err := image.DecodeConfig(r)
+	if err != nil {
+		return nil, err
+	}
+	return &model.AvatarMetaDimensions{
+		Width:  config.Width,
+		Height: config.Height,
+	}, nil
 }

@@ -10,6 +10,10 @@ import (
 	"time"
 
 	"github.com/ibeloyar/gophprofile/internal/config"
+	"github.com/ibeloyar/gophprofile/internal/repository/broker"
+	"github.com/ibeloyar/gophprofile/internal/repository/s3"
+	"github.com/ibeloyar/gophprofile/internal/repository/storage"
+	"github.com/ibeloyar/gophprofile/internal/service"
 	"github.com/ibeloyar/gophprofile/pkg/logger"
 )
 
@@ -26,7 +30,24 @@ func Run(cfg *config.Config) error {
 	}
 	defer lg.Sync()
 
-	server, err := NewServer(lg, cfg)
+	storageRepo, err := storage.New(cfg.PGConnString)
+	if err != nil {
+		return err
+	}
+
+	publisher, err := broker.NewPublisher(cfg.RabbitURL)
+	if err != nil {
+		return err
+	}
+
+	s3Repo, err := s3.New(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey)
+	if err != nil {
+		return err
+	}
+
+	srv := service.New(lg, storageRepo, s3Repo, publisher)
+
+	server, err := NewServer(lg, cfg.HTTPAddr, srv)
 	if err != nil {
 		return err
 	}
@@ -47,13 +68,17 @@ func Run(cfg *config.Config) error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	lg.Info("shutting down server...")
+	lg.Info("shutting down app...")
 
 	stopChan := make(chan struct{})
 
 	go func() {
+		if err := srv.Shutdown(); err != nil {
+			lg.Errorf("shutdown (service) error: %s", err)
+		}
+
 		if err := server.Shutdown(shutdownCtx); err != nil {
-			lg.Errorf("shutdown error: %s", err)
+			lg.Errorf("shutdown (server) error: %s", err)
 		}
 
 		stopChan <- struct{}{}

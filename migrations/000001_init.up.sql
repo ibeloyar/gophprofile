@@ -4,6 +4,8 @@ CREATE TABLE IF NOT EXISTS avatars (
     file_name VARCHAR(255) NOT NULL,
     mime_type VARCHAR(100) NOT NULL,
     size_bytes BIGINT NOT NULL,
+    width INTEGER,
+    height INTEGER,
     s3_key VARCHAR(500) NOT NULL,
     thumbnail_s3_keys JSONB,
     upload_status VARCHAR(50) DEFAULT 'uploading',

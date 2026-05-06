@@ -2,36 +2,40 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"strings"
+	_ "image/jpeg" // Регистрация JPEG
+	_ "image/png"  // Регистрация PNG
+
+	_ "golang.org/x/image/webp" // Если используете golang.org/x/image/webp
 
 	"github.com/ibeloyar/gophprofile/internal/model"
 	"go.uber.org/zap"
 )
 
-const (
-	maxFileSize      = 10 * 1024 * 1024 // 10MB
-	supportedFormats = "image/jpeg,image/png,image/webp"
-)
-
 type Storage interface {
 	Health() error
-	CreateAvatar(ctx context.Context, userID, fileName, mimeType string, sizeBytes int64) (*model.AvatarCreateInfo, error)
+	Shutdown() error
+
+	CreateAvatar(ctx context.Context, userID, fileName, mimeType string, width, height int, sizeBytes int64) (*model.AvatarCreateInfo, error)
 	UpdateAvatarS3Key(ctx context.Context, id string, s3Key string) error
+	GetAvatarMeta(ctx context.Context, avatarID, userID string) (*model.AvatarMeta, error)
+	GetAvatarByID(ctx context.Context, avatarID, userID string) (*model.Avatar, error)
+	SoftDeleteAvatar(ctx context.Context, avatarID, userID string) error
 }
 
 type S3Storage interface {
 	Health() error
-	Upload(ctx context.Context, objectKey string, reader io.Reader) error
-	Download(ctx context.Context, objectKey string) ([]byte, error)
+	Upload(ctx context.Context, objectKey, contentType string, data []byte) error
+	Download(ctx context.Context, objectKey string) ([]byte, string, error)
 }
 
 type Publisher interface {
 	Health() error
+	Shutdown() error
 
 	PublishUpload(ctx context.Context, event *model.AvatarUploadEvent) error
+	PublishDelete(ctx context.Context, event *model.AvatarDeleteEvent) error
 }
 
 type Service struct {
@@ -50,7 +54,19 @@ func New(lg *zap.SugaredLogger, storage Storage, s3 S3Storage, publisher Publish
 	}
 }
 
-func (s *Service) Health(w http.ResponseWriter, r *http.Request) {
+func (s *Service) Shutdown() error {
+	if err := s.storage.Shutdown(); err != nil {
+		return err
+	}
+
+	if err := s.publisher.Shutdown(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Service) Health() *model.HealthResponse {
 	response := &model.HealthResponse{
 		Postgresql: true,
 		Minio:      true,
@@ -69,85 +85,89 @@ func (s *Service) Health(w http.ResponseWriter, r *http.Request) {
 		response.RabbitMQ = false
 	}
 
-	writeJSON(w, s.lg, response, http.StatusOK)
+	return response
 }
 
-func (s *Service) UploadAvatar(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
-	if userID == "" {
-		http.Error(w, "X-User-ID required", http.StatusBadRequest)
-		return
-	}
+func (s *Service) UploadAvatar(ctx context.Context, userID string, avatarFile *model.AvatarFile) (*model.AvatarCreateInfo, error) {
 
-	file, header, err := r.FormFile("file")
+	avatar, err := s.storage.CreateAvatar(ctx, userID, avatarFile.Filename, avatarFile.ContentType, avatarFile.Width, avatarFile.Height, avatarFile.Size)
 	if err != nil {
-		http.Error(w, "file required", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
-	if err := r.ParseMultipartForm(maxFileSize); err != nil {
-		writeJSON(w, s.lg, model.UploadAvatarSizeError{
-			Error:   "File too large",
-			MaxSize: maxFileSize,
-		}, http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	contentType := header.Header.Get("Content-Type")
-	if !strings.Contains(supportedFormats, contentType) {
-		writeJSON(w, s.lg, model.UploadAvatarFormatError{
-			Error:   "Invalid file format",
-			Details: fmt.Sprintf("invalid file format, supported: %s", supportedFormats),
-		}, http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	if header.Size > maxFileSize {
-		writeJSON(w, s.lg, model.UploadAvatarSizeError{
-			Error:   "File too large",
-			MaxSize: maxFileSize,
-		}, http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	avatar, err := s.storage.CreateAvatar(r.Context(), userID, header.Filename, contentType, header.Size)
-	if err != nil {
-		s.lg.Error("failed db create avatar", zap.Error(err))
-		http.Error(w, "upload failed", http.StatusInternalServerError)
-		return
+		return nil, errors.New("failed db create avatar")
 	}
 
 	objectKey := fmt.Sprintf("%s/%s", userID, avatar.ID)
 
-	err = s.s3.Upload(r.Context(), objectKey, file)
+	err = s.s3.Upload(ctx, objectKey, avatarFile.ContentType, avatarFile.Data)
 	if err != nil {
-		s.lg.Error("failed to s3 upload avatar", zap.Error(err))
-		http.Error(w, "upload failed", http.StatusInternalServerError)
-		return
+		fmt.Println(err)
+		return nil, errors.New("failed to s3 upload avatar")
 	}
 
-	if err := s.storage.UpdateAvatarS3Key(r.Context(), avatar.ID.String(), objectKey); err != nil {
-		s.lg.Error("failed to s3 upload avatar", zap.Error(err))
-		http.Error(w, "upload failed", http.StatusInternalServerError)
-		return
+	if err := s.storage.UpdateAvatarS3Key(ctx, avatar.ID.String(), objectKey); err != nil {
+		return nil, errors.New("failed to storage update S3 key")
 	}
 
-	if err := s.publisher.PublishUpload(r.Context(), &model.AvatarUploadEvent{
+	if err := s.publisher.PublishUpload(ctx, &model.AvatarUploadEvent{
 		AvatarID: avatar.ID.String(),
 		UserID:   userID,
 		S3Key:    objectKey,
 	}); err != nil {
-		s.lg.Error("failed to s3 upload avatar", zap.Error(err))
-		http.Error(w, "upload failed", http.StatusInternalServerError)
-		return
+		return nil, errors.New("failed to s3 upload avatar")
 	}
 
-	writeJSON(w, s.lg, model.UploadAvatarResponse{
-		ID:        avatar.ID.String(),
-		UserID:    avatar.UserID,
-		URL:       fmt.Sprintf("/api/v1/avatars/%s", avatar.ID),
-		Status:    "processing",
-		CreatedAt: avatar.CreatedAt,
-	}, http.StatusCreated)
+	return avatar, nil
+}
+
+func (s *Service) DownloadAvatar(ctx context.Context, avatarID, userID string) ([]byte, string, error) {
+	objectKey := fmt.Sprintf("%s/%s", userID, avatarID)
+
+	fileData, contentType, err := s.s3.Download(ctx, objectKey)
+	if err != nil {
+		return nil, "", err
+	}
+
+	return fileData, contentType, err
+}
+
+func (s *Service) GetAvatarMeta(ctx context.Context, avatarID, userID string) (*model.AvatarMeta, error) {
+	avatar, err := s.storage.GetAvatarMeta(ctx, avatarID, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	return avatar, nil
+}
+
+func (s *Service) DeleteAvatar(ctx context.Context, avatarID, userID string) error {
+	avatar, err := s.storage.GetAvatarByID(ctx, avatarID, userID)
+	if err != nil {
+		return err
+	}
+	if avatar == nil {
+		return errors.New("not found")
+	}
+
+	if avatar.UserID != userID {
+		return errors.New("not allowed")
+	}
+
+	if err := s.storage.SoftDeleteAvatar(ctx, avatarID, userID); err != nil {
+		return err
+	}
+
+	thumbnailS3Keys := make([]string, 0) // avatar.ThumbnailS3Keys
+	s3Keys := make([]string, 0, 1+len(thumbnailS3Keys))
+	if avatar.S3Key != "" {
+		s3Keys = append(s3Keys, avatar.S3Key)
+	}
+	s3Keys = append(s3Keys, thumbnailS3Keys...)
+
+	if err := s.publisher.PublishDelete(ctx, &model.AvatarDeleteEvent{
+		AvatarID: avatarID,
+		S3Keys:   s3Keys,
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }

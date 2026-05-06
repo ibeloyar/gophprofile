@@ -1,13 +1,15 @@
+include .env
+
 APP_NAME=gophprofile
 
 BUILD_DIR := build
 BIN_DIR := bin
-DB_HOST=192.168.0.105
-DB_USER=gophprofile
-DB_NAME=gophprofile
-DB_PASS=gophprofile
-DB_PORT=5432
-DB_STRING="postgres://$(DB_NAME):$(DB_PASS)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable"
+#DB_HOST=localhost # 192.168.0.105
+#DB_USER=gophprofile
+#DB_NAME=gophprofile
+#DB_PASS=gophprofile
+#DB_PORT=5432
+DB_STRING="postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable"
 DB_MIGRATIONS_PATH="./migrations"
 
 .DEFAULT_GOAL := help
@@ -48,7 +50,7 @@ install-pg-tools:
 .PHONY: install-mock-tools
 install-mock-tools:
 	go install github.com/golang/mock/mockgen@latest  # mocks for tests
-	go install github.com/golang/mock/gomock@latest
+	#go install github.com/golang/mock/gomock@latest
 
 .PHONY: install-all-tools
 install-all-tools: install-mock-tools install-pg-tools

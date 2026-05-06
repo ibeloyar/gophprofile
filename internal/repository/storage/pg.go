@@ -3,8 +3,11 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
+	"time"
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
@@ -78,16 +81,17 @@ func (s *PGStorage) Shutdown() error {
 	return s.db.Close()
 }
 
-func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType string, sizeBytes int64) (*model.AvatarCreateInfo, error) {
+func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType string, width, height int, sizeBytes int64) (*model.AvatarCreateInfo, error) {
 	query := `
-        INSERT INTO avatars (user_id, file_name, mime_type, size_bytes, s3_key, thumbnail_s3_keys)
-        VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, user_id, s3_key, processing_status, created_at`
+        INSERT INTO avatars (user_id, file_name, mime_type, size_bytes, width, height, s3_key)
+        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, user_id, processing_status, created_at`
 
 	avatar := &model.AvatarCreateInfo{}
 
-	if err := s.db.QueryRowContext(ctx, query, userID, fileName, mimeType, sizeBytes, "{}").Scan(
+	if err := s.db.QueryRowContext(ctx, query, userID, fileName, mimeType, sizeBytes, width, height, "").Scan(
 		&avatar.ID, &avatar.UserID, &avatar.ProcessingStatus, &avatar.CreatedAt,
 	); err != nil {
+		fmt.Println(err)
 		return nil, err
 	}
 
@@ -102,6 +106,112 @@ func (s *PGStorage) UpdateAvatarS3Key(ctx context.Context, id string, s3Key stri
 			updated_at = NOW()
 		WHERE id = $2
 	`, s3Key, id)
+
+	return err
+}
+
+func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) (*model.AvatarMeta, error) {
+	query := `
+        SELECT id, user_id, file_name, mime_type, size_bytes, thumbnail_s3_keys, created_at, updated_at
+        FROM avatars WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+
+	var (
+		avatar          model.AvatarMeta
+		thumbnailsBytes []byte // Временный буфер для JSONB данных
+	)
+
+	err := s.db.QueryRowContext(ctx, query, avatarID, userID).Scan(
+		&avatar.ID,
+		&avatar.UserID,
+		&avatar.FileName,
+		&avatar.MimeType,
+		&avatar.SizeBytes,
+		&thumbnailsBytes,
+		&avatar.CreatedAt,
+		&avatar.UpdatedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil // Или специфичная ошибка "not found"
+		}
+		return nil, err
+	}
+
+	avatar.Thumbnails = make(model.AvatarMetaThumbnails, 0)
+	var thumbnailsJSON map[string]string
+
+	if len(thumbnailsBytes) > 0 {
+		if err := json.Unmarshal(thumbnailsBytes, &thumbnailsJSON); err != nil {
+			return nil, err
+		}
+
+		for k, v := range thumbnailsJSON {
+			avatar.Thumbnails = append(avatar.Thumbnails, &model.AvatarMetaThumbnail{
+				Size: k,
+				Url:  v,
+			})
+		}
+	}
+
+	return &avatar, nil
+}
+
+func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) (*model.Avatar, error) {
+	query := `
+        SELECT id, user_id, file_name, mime_type, size_bytes, s3_key, thumbnail_s3_keys, 
+               upload_status, processing_status, created_at, updated_at, deleted_at
+        FROM avatars 
+        WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
+
+	avatar := &model.Avatar{}
+	var (
+		thumbnailsBytes []byte
+		deletedAtPtr    *time.Time
+	)
+
+	err := s.db.QueryRowContext(ctx, query, avatarID, userID).Scan(
+		&avatar.ID,
+		&avatar.UserID,
+		&avatar.FileName,
+		&avatar.MimeType,
+		&avatar.SizeBytes,
+		&avatar.S3Key,
+		&thumbnailsBytes,
+		&avatar.UploadStatus,
+		&avatar.ProcessingStatus,
+		&avatar.CreatedAt,
+		&avatar.UpdatedAt,
+		&deletedAtPtr,
+	)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	// Handle thumbnails JSONB
+	if len(thumbnailsBytes) > 0 {
+		if err := json.Unmarshal(thumbnailsBytes, &avatar.ThumbnailS3Keys); err != nil {
+			return nil, err
+		}
+	}
+
+	// Handle nullable deleted_at
+	avatar.DeletedAt = deletedAtPtr
+
+	return avatar, nil
+}
+
+func (s *PGStorage) SoftDeleteAvatar(ctx context.Context, avatarID, userID string) error {
+	_, err := s.db.ExecContext(ctx, `
+        UPDATE avatars 
+        SET deleted_at = NOW(),
+            updated_at = NOW()
+        WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+    `, avatarID, userID)
 
 	return err
 }

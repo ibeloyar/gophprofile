@@ -17,7 +17,7 @@ type Config struct {
 	RabbitURL      string
 }
 
-func ReadConfig() (*Config, error) {
+func MustReadConfig() *Config {
 	_ = godotenv.Load()
 
 	cfg := &Config{
@@ -26,7 +26,8 @@ func ReadConfig() (*Config, error) {
 
 	cfg.PGConnString = buildPostgresDSN()
 	if cfg.PGConnString == "" {
-		return nil, fmt.Errorf("PG connection string is empty")
+		log.Fatal("PG connection string is empty")
+		return nil
 	}
 
 	cfg.MinIOEndpoint = mustEnv("MINIO_ENDPOINT")
@@ -34,7 +35,7 @@ func ReadConfig() (*Config, error) {
 	cfg.MinIOSecretKey = mustEnv("MINIO_SECRET_KEY")
 	cfg.RabbitURL = mustEnv("RABBITMQ_URL")
 
-	return cfg, nil
+	return cfg
 }
 
 func mustEnv(key string) string {
@@ -51,6 +52,7 @@ func getEnvOrDefault(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+
 	return def
 }
 

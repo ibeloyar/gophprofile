@@ -14,6 +14,15 @@ type UploadAvatarSizeError struct {
 	MaxSize int64  `json:"max_size"`
 }
 
+type DownloadAvatarNotFoundError struct {
+	Error string `json:"error"`
+}
+
+type DeleteAvatarForbiddenError struct {
+	Error   string `json:"error"`
+	Details string `json:"details"`
+}
+
 type HealthResponse struct {
 	Postgresql bool `json:"postgresql"`
 	Minio      bool `json:"minio"`

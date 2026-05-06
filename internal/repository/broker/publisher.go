@@ -104,3 +104,16 @@ func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUpload
 		Body:         body,
 	})
 }
+
+func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDeleteEvent) error {
+	body, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal event: %w", err)
+	}
+
+	return p.channel.PublishWithContext(ctx, exchangeName, deleteKey, false, false, amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		Body:         body,
+	})
+}
