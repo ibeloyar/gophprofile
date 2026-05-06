@@ -26,6 +26,7 @@ type Storage interface {
 
 type S3Storage interface {
 	Health() error
+
 	Upload(ctx context.Context, objectKey, contentType string, data []byte) error
 	Download(ctx context.Context, objectKey string) ([]byte, string, error)
 }
@@ -89,8 +90,10 @@ func (s *Service) Health() *model.HealthResponse {
 }
 
 func (s *Service) UploadAvatar(ctx context.Context, userID string, avatarFile *model.AvatarFile) (*model.AvatarCreateInfo, error) {
-
-	avatar, err := s.storage.CreateAvatar(ctx, userID, avatarFile.Filename, avatarFile.ContentType, avatarFile.Width, avatarFile.Height, avatarFile.Size)
+	avatar, err := s.storage.CreateAvatar(ctx,
+		userID, avatarFile.Filename, avatarFile.ContentType,
+		avatarFile.Width, avatarFile.Height, avatarFile.Size,
+	)
 	if err != nil {
 		return nil, errors.New("failed db create avatar")
 	}
@@ -99,7 +102,6 @@ func (s *Service) UploadAvatar(ctx context.Context, userID string, avatarFile *m
 
 	err = s.s3.Upload(ctx, objectKey, avatarFile.ContentType, avatarFile.Data)
 	if err != nil {
-		fmt.Println(err)
 		return nil, errors.New("failed to s3 upload avatar")
 	}
 

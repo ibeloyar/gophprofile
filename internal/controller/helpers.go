@@ -72,7 +72,7 @@ var (
 	ErrFileInvalidFormat = errors.New("invalid file format")
 )
 
-// readAvatarFile -
+// readAvatarFile - read avatar file from request and return model.AvatarFile struct
 func readAvatarFile(r *http.Request) (*model.AvatarFile, error) {
 	file, header, err := r.FormFile("file")
 	if err != nil {
@@ -115,12 +115,13 @@ func readAvatarFile(r *http.Request) (*model.AvatarFile, error) {
 	}, nil
 }
 
-// getDimensions -
+// getDimensions - decode image size from file (io.Reader)
 func getDimensions(r io.Reader) (*model.AvatarMetaDimensions, error) {
 	config, _, err := image.DecodeConfig(r)
 	if err != nil {
 		return nil, err
 	}
+
 	return &model.AvatarMetaDimensions{
 		Width:  config.Width,
 		Height: config.Height,

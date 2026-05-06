@@ -72,7 +72,7 @@ func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 			}, http.StatusBadRequest)
 			return
 		} else {
-			c.lg.Error("read avatar error: ", zap.Error(err))
+			c.lg.Error("readAvatarFile error: ", zap.Error(err))
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
@@ -80,7 +80,7 @@ func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 
 	avatar, err := c.service.UploadAvatar(r.Context(), userID, avatarFile)
 	if err != nil {
-		c.lg.Error("failed db create avatar", zap.Error(err))
+		c.lg.Error("service.UploadAvatar error: ", zap.Error(err))
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -89,7 +89,7 @@ func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		ID:        avatar.ID.String(),
 		UserID:    avatar.UserID,
 		URL:       fmt.Sprintf("/api/v1/avatars/%s", avatar.ID),
-		Status:    "processing",
+		Status:    model.ProcessingOpProcessing,
 		CreatedAt: avatar.CreatedAt,
 	}, http.StatusCreated)
 }

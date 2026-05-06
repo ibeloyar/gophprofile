@@ -30,9 +30,9 @@ type HealthResponse struct {
 }
 
 type UploadAvatarResponse struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"user_id"`
-	URL       string    `json:"url"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string       `json:"id"`
+	UserID    string       `json:"user_id"`
+	URL       string       `json:"url"`
+	Status    ProcessingOp `json:"status"`
+	CreatedAt time.Time    `json:"created_at"`
 }

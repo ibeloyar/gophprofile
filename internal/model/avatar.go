@@ -18,10 +18,10 @@ const (
 type ProcessingOp string
 
 const (
-	ProcessingOpPending   ProcessingOp = "pending"
-	ProcessingOpRunning   ProcessingOp = "processing"
-	ProcessingOpCompleted ProcessingOp = "completed"
-	ProcessingOpFailed    ProcessingOp = "failed"
+	ProcessingOpPending    ProcessingOp = "pending"
+	ProcessingOpProcessing ProcessingOp = "processing"
+	ProcessingOpCompleted  ProcessingOp = "completed"
+	ProcessingOpFailed     ProcessingOp = "failed"
 )
 
 type Avatar struct {

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"time"
 
@@ -70,7 +69,7 @@ func New(connStr string) (*PGStorage, error) {
 	}, nil
 }
 
-// Ping
+// Health db health check (Ping)
 func (s *PGStorage) Health() error {
 	return s.db.Ping()
 }
@@ -91,7 +90,6 @@ func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType
 	if err := s.db.QueryRowContext(ctx, query, userID, fileName, mimeType, sizeBytes, width, height, "").Scan(
 		&avatar.ID, &avatar.UserID, &avatar.ProcessingStatus, &avatar.CreatedAt,
 	); err != nil {
-		fmt.Println(err)
 		return nil, err
 	}
 
@@ -99,24 +97,22 @@ func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType
 }
 
 func (s *PGStorage) UpdateAvatarS3Key(ctx context.Context, id string, s3Key string) error {
-	_, err := s.db.ExecContext(ctx, `
-		UPDATE avatars
-		SET s3_key = $1,
-			upload_status = 'uploaded',
-			updated_at = NOW()
-		WHERE id = $2
-	`, s3Key, id)
+	query := `UPDATE avatars SET s3_key = $1, upload_status = 'uploaded', updated_at = NOW() WHERE id = $2`
+
+	_, err := s.db.ExecContext(ctx, query, s3Key, id)
 
 	return err
 }
 
 func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) (*model.AvatarMeta, error) {
 	query := `
-        SELECT id, user_id, file_name, mime_type, size_bytes, thumbnail_s3_keys, created_at, updated_at
+        SELECT id, user_id, file_name, mime_type, size_bytes, width, height, thumbnail_s3_keys, created_at, updated_at
         FROM avatars WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
 
 	var (
 		avatar          model.AvatarMeta
+		widthPtr        *int
+		heightPtr       *int
 		thumbnailsBytes []byte // Временный буфер для JSONB данных
 	)
 
@@ -126,6 +122,8 @@ func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) 
 		&avatar.FileName,
 		&avatar.MimeType,
 		&avatar.SizeBytes,
+		&widthPtr,
+		&heightPtr,
 		&thumbnailsBytes,
 		&avatar.CreatedAt,
 		&avatar.UpdatedAt,
@@ -133,11 +131,20 @@ func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) 
 
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil // Или специфичная ошибка "not found"
+			return nil, nil
 		}
 		return nil, err
 	}
 
+	// AvatarMetaDimensions
+	if widthPtr != nil {
+		avatar.Dimensions.Width = *widthPtr
+	}
+	if heightPtr != nil {
+		avatar.Dimensions.Height = *heightPtr
+	}
+
+	// AvatarMetaThumbnails
 	avatar.Thumbnails = make(model.AvatarMetaThumbnails, 0)
 	var thumbnailsJSON map[string]string
 
