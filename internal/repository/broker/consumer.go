@@ -1,0 +1,221 @@
+package broker
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"image"
+	"image/jpeg"
+
+	"github.com/disintegration/imaging"
+	"github.com/ibeloyar/gophprofile/internal/model"
+	"go.uber.org/zap"
+
+	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+type Storage interface {
+	UpdateProcessingStatus(ctx context.Context, avatarID string, status model.ProcessingOp) error
+	SetThumbnailsData(ctx context.Context, avatarID string, avatarThumbnails []byte) error
+}
+
+type S3Storage interface {
+	Upload(ctx context.Context, objectKey, contentType string, data []byte) error
+	Download(ctx context.Context, objectKey string) ([]byte, string, error)
+	DeleteObjects(ctx context.Context, objectKeys []string) error
+}
+
+type Consumer struct {
+	lg      *zap.SugaredLogger
+	conn    *amqp.Connection
+	channel *amqp.Channel
+	storage Storage
+	s3      S3Storage
+}
+
+func NewConsumer(lg *zap.SugaredLogger, url string, storage Storage, s3 S3Storage) (*Consumer, error) {
+	conn, err := amqp.Dial(url)
+	if err != nil {
+		return nil, err
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	return &Consumer{
+		lg:      lg,
+		conn:    conn,
+		channel: ch,
+		storage: storage,
+		s3:      s3,
+	}, nil
+}
+
+func (c *Consumer) Run() error {
+	// Объявляем очереди
+	if _, err := c.channel.QueueDeclare(uploadQueue, true, false, false, false, nil); err != nil {
+		return err
+	}
+	if _, err := c.channel.QueueDeclare(deleteQueue, true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	// Bind queues to exchange
+	if err := c.channel.QueueBind(uploadQueue, uploadKey, exchangeName, false, nil); err != nil {
+		return err
+	}
+	if err := c.channel.QueueBind(deleteQueue, deleteKey, exchangeName, false, nil); err != nil {
+		return err
+	}
+
+	if err := c.channel.Qos(10, 0, false); err != nil {
+		return err
+	}
+
+	go c.handleUpload()
+	go c.handleDelete()
+
+	c.lg.Info("consumer running")
+	return nil
+}
+
+func (c *Consumer) handleUpload() {
+	msgs, err := c.channel.Consume(uploadQueue, "upload-worker", false, false, false, false, nil)
+	if err != nil {
+		c.lg.Errorf("upload consume: %v", err)
+		return
+	}
+
+	for msg := range msgs {
+		var event model.AvatarUploadEvent
+
+		if err := json.Unmarshal(msg.Body, &event); err != nil {
+			c.lg.Errorf("unmarshal upload event: %v", err)
+			msg.Nack(false, false)
+			continue
+		}
+
+		if err := c.UploadHandler(context.Background(), &event); err != nil {
+			c.lg.Errorf("upload handler error: %v", err)
+			msg.Nack(false, false)
+			continue
+		}
+
+		msg.Ack(false)
+	}
+}
+
+func (c *Consumer) handleDelete() {
+	msgs, err := c.channel.Consume(deleteQueue, "delete-worker", false, false, false, false, nil)
+	if err != nil {
+		c.lg.Errorf("delete consume: %v", err)
+		return
+	}
+
+	for msg := range msgs {
+		var event model.AvatarDeleteEvent
+
+		if err := json.Unmarshal(msg.Body, &event); err != nil {
+			c.lg.Errorf("unmarshal delete event: %v", err)
+			msg.Nack(false, false)
+			continue
+		}
+
+		if err := c.DeleteHandler(context.Background(), &event); err != nil {
+			c.lg.Errorf("delete handler error: %v", err)
+			msg.Nack(false, false)
+			continue
+		}
+
+		msg.Ack(false)
+	}
+}
+
+func (c *Consumer) Shutdown() error {
+	if err := c.channel.Close(); err != nil {
+		return err
+	}
+
+	return c.conn.Close()
+}
+
+func (c *Consumer) UploadHandler(ctx context.Context, event *model.AvatarUploadEvent) error {
+	if err := c.storage.UpdateProcessingStatus(ctx, event.AvatarID, model.ProcessingOpProcessing); err != nil {
+		return err
+	}
+
+	originalImage, _, err := c.s3.Download(ctx, event.S3Key)
+	if err != nil {
+		return err
+	}
+
+	thumbnails := []struct {
+		width  int
+		height int
+	}{
+		{100, 100},
+		{300, 300},
+	}
+
+	avatarThumbnailsMap := make(map[string]string)
+
+	// Сохраняем миниатюры в S3
+	for _, thumb := range thumbnails {
+		thumbnailImageData, err := c.Resize(originalImage, thumb.width, thumb.height)
+		if err != nil {
+			if err := c.storage.UpdateProcessingStatus(ctx, event.AvatarID, model.ProcessingOpFailed); err != nil {
+				return err
+			}
+			return err
+		}
+
+		objectKey := fmt.Sprintf("%s/%s_%dx%d", event.UserID, event.AvatarID, thumb.width, thumb.height)
+		if err := c.s3.Upload(ctx, objectKey, "image/jpeg", thumbnailImageData); err != nil {
+			if err := c.storage.UpdateProcessingStatus(ctx, event.AvatarID, model.ProcessingOpFailed); err != nil {
+				return err
+			}
+			return err
+		}
+
+		thumbnailKey := fmt.Sprintf("%dx%d", thumb.width, thumb.height)
+		thumbnailUrl := fmt.Sprintf("%s_%dx%d", event.AvatarID, thumb.width, thumb.height)
+		avatarThumbnailsMap[thumbnailKey] = thumbnailUrl
+	}
+
+	avatarThumbnails, err := json.Marshal(avatarThumbnailsMap)
+	if err != nil {
+		return fmt.Errorf("marshal thumbnails: %w", err)
+	}
+
+	return c.storage.SetThumbnailsData(ctx, event.AvatarID, avatarThumbnails)
+}
+
+func (c *Consumer) DeleteHandler(ctx context.Context, event *model.AvatarDeleteEvent) error {
+	if err := c.s3.DeleteObjects(ctx, event.S3Keys); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Consumer) Resize(imageData []byte, width, height int) ([]byte, error) {
+	img, _, err := image.Decode(bytes.NewReader(imageData))
+	if err != nil {
+		return nil, fmt.Errorf("decode: %w", err)
+	}
+
+	resized := imaging.Resize(img, width, height, imaging.Lanczos)
+
+	buf := new(bytes.Buffer)
+
+	err = jpeg.Encode(buf, resized, &jpeg.Options{Quality: 85})
+	if err != nil {
+		return nil, fmt.Errorf("encode jpeg: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}

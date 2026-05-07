@@ -17,8 +17,6 @@ import (
 )
 
 const (
-	ErrIsExistCode = "23505"
-
 	migrationsTable = "schema_migrations"
 	schemaName      = "public"
 	migrationsPath  = "./migrations"
@@ -215,10 +213,40 @@ func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) 
 func (s *PGStorage) SoftDeleteAvatar(ctx context.Context, avatarID, userID string) error {
 	_, err := s.db.ExecContext(ctx, `
         UPDATE avatars 
-        SET deleted_at = NOW(),
+        SET thumbnail_s3_keys = NULL,
+            deleted_at = NOW(),
             updated_at = NOW()
         WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
     `, avatarID, userID)
 
 	return err
+}
+
+func (s *PGStorage) UpdateProcessingStatus(ctx context.Context, avatarID string, status model.ProcessingOp) error {
+	query := `
+        UPDATE avatars SET processing_status = $1, updated_at = NOW()
+        WHERE id = $2 AND deleted_at IS NULL RETURNING id`
+
+	var id string
+	err := s.db.QueryRowContext(ctx, query, status, avatarID).Scan(&id)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (s *PGStorage) SetThumbnailsData(ctx context.Context, avatarID string, avatarThumbnails []byte) error {
+	query := `
+        UPDATE avatars SET thumbnail_s3_keys = $1::jsonb, processing_status = 'completed', updated_at = NOW()
+        WHERE id = $2 AND deleted_at IS NULL RETURNING id`
+
+	var id string
+	err := s.db.QueryRowContext(ctx, query, avatarThumbnails, avatarID).Scan(&id)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

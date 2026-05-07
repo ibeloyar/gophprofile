@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	_ "image/jpeg" // Регистрация JPEG
@@ -157,8 +158,12 @@ func (s *Service) DeleteAvatar(ctx context.Context, avatarID, userID string) err
 		return err
 	}
 
-	thumbnailS3Keys := make([]string, 0) // avatar.ThumbnailS3Keys
-	s3Keys := make([]string, 0, 1+len(thumbnailS3Keys))
+	thumbnailS3Keys, err := parseThumbnailUrls(userID, avatar.ThumbnailS3Keys)
+	if err != nil {
+		return err
+	}
+
+	s3Keys := make([]string, 0, len(thumbnailS3Keys)+1)
 	if avatar.S3Key != "" {
 		s3Keys = append(s3Keys, avatar.S3Key)
 	}
@@ -172,4 +177,24 @@ func (s *Service) DeleteAvatar(ctx context.Context, avatarID, userID string) err
 	}
 
 	return nil
+}
+
+func parseThumbnailUrls(userID string, raw *json.RawMessage) ([]string, error) {
+	if raw == nil {
+		return nil, nil
+	}
+
+	var thumbs map[string]string
+	if err := json.Unmarshal(*raw, &thumbs); err != nil {
+		return nil, fmt.Errorf("unmarshal thumbnails: %w", err)
+	}
+
+	urls := make([]string, 0, len(thumbs))
+	for _, url := range thumbs {
+		if url != "" {
+			urls = append(urls, fmt.Sprintf("%s/%s", userID, url))
+		}
+	}
+
+	return urls, nil
 }

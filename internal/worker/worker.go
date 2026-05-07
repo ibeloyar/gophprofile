@@ -1,84 +1,79 @@
 package worker
 
-//import "fmt"
-//
-//type AvatarUploadEvent struct {
-//	AvatarID string `json:"avatar_id"`
-//	UserID   string `json:"user_id"`
-//	S3Key    string `json:"s3_key"`
-//}
-//
-//type AvatarProcessEvent struct {
-//	AvatarID   string         `json:"avatar_id"`
-//	Operations []ProcessingOp `json:"operations"`
-//}
-//
-//type AvatarDeleteEvent struct {
-//	AvatarID string   `json:"avatar_id"`
-//	S3Keys   []string `json:"s3_keys"`
-//}
-//
-////// Пример отправки события после загрузки
-////func (s *AvatarService) PublishUploadEvent(avatarID, userID, s3Key string) error {
-////	event := AvatarUploadEvent{
-////		AvatarID: avatarID,
-////		UserID:   userID,
-////		S3Key:    s3Key,
-////	}
-////
-////	// Для RabbitMQ
-////	return s.publisher.Publish(
-////		"avatars.exchange",     // exchange
-////		"avatar.uploaded",       // routing key
-////		event,
-////	)
-////
-////	// Для Kafka
-////	return s.producer.Send(&sarama.ProducerMessage{
-////		Topic: "avatar-events",
-////		Key:   sarama.StringEncoder(avatarID),
-////		Value: sarama.JSONEncoder(event),
-////	})
-////}
-//
-//type Worker struct {
-//}
-//
-//func New() *Worker {
-//	return &Worker{}
-//}
-//
-//// Пример обработки события в worker
-//func (w *Worker) HandleUploadEvent(event AvatarUploadEvent) error {
-//	// Получаем метаданные из БД
-//	avatar, err := w.repo.GetAvatar(event.AvatarID)
-//	if err != nil {
-//		return err
-//	}
-//
-//	// Загружаем оригинал из S3
-//	image, err := w.s3.Download(event.S3Key)
-//	if err != nil {
-//		return err
-//	}
-//
-//	// Создаем миниатюры
-//	thumbnails := []struct {
-//		size string
-//		data []byte
-//	}{
-//		{"100x100", w.resizer.Resize(image, 100, 100)},
-//		{"300x300", w.resizer.Resize(image, 300, 300)},
-//	}
-//
-//	// Сохраняем миниатюры в S3
-//	for _, thumb := range thumbnails {
-//		key := fmt.Sprintf("thumbnails/%s/%s.jpg", event.AvatarID, thumb.size)
-//		if err := w.s3.Upload(key, thumb.data); err != nil {
-//			return err
-//		}
-//	}
-//
-//	// Обновляем статус в БД
-//	return w.repo.UpdateProcessingStatus(event.AvatarID, "completed")
-//}
+import (
+	"context"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/ibeloyar/gophprofile/internal/config"
+	"github.com/ibeloyar/gophprofile/internal/repository/broker"
+	"github.com/ibeloyar/gophprofile/internal/repository/s3"
+	"github.com/ibeloyar/gophprofile/internal/repository/storage"
+	"github.com/ibeloyar/gophprofile/pkg/logger"
+)
+
+const (
+	appName = "gophprofile-worker"
+
+	shutdownTimeout = 10 * time.Second
+)
+
+func Run(cfg *config.Config) error {
+	lg, err := logger.New()
+	if err != nil {
+		return err
+	}
+	defer lg.Sync()
+
+	storageRepo, err := storage.New(cfg.PGConnString)
+	if err != nil {
+		return err
+	}
+
+	s3Repo, err := s3.New(cfg.MinIOEndpoint, cfg.MinIOAccessKey, cfg.MinIOSecretKey)
+	if err != nil {
+		return err
+	}
+
+	consumer, err := broker.NewConsumer(lg, cfg.RabbitURL, storageRepo, s3Repo)
+	if err != nil {
+		return err
+	}
+
+	go func() {
+		if err = consumer.Run(); err != nil {
+			lg.Fatal("starting consumer failed: %v", err)
+		}
+	}()
+
+	// Shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	<-ctx.Done()
+
+	lg.Info("shutting down worker...")
+
+	stopChan := make(chan struct{})
+
+	go func() {
+		if err := consumer.Shutdown(); err != nil {
+			lg.Errorf("shutdown worker (consumer) error: %s", err)
+		}
+		if err := storageRepo.Shutdown(); err != nil {
+			lg.Errorf("shutdown worker (storage) error: %s", err)
+		}
+
+		stopChan <- struct{}{}
+	}()
+
+	select {
+	case <-stopChan:
+		lg.Info("shutting down worker gracefully")
+	case <-time.NewTicker(shutdownTimeout).C:
+		lg.Error("shutting down worker timed out error")
+	}
+
+	return nil
+}

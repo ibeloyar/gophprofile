@@ -4,11 +4,7 @@ APP_NAME=gophprofile
 
 BUILD_DIR := build
 BIN_DIR := bin
-#DB_HOST=localhost # 192.168.0.105
-#DB_USER=gophprofile
-#DB_NAME=gophprofile
-#DB_PASS=gophprofile
-#DB_PORT=5432
+
 DB_STRING="postgres://$(DB_USER):$(DB_PASSWORD)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)?sslmode=disable"
 DB_MIGRATIONS_PATH="./migrations"
 
@@ -43,17 +39,11 @@ else
 endif
 
 
-.PHONY: install-pg-tools
-install-pg-tools:
+.PHONY: install-tools
+install-tools:
+	go install github.com/golang/mock/mockgen@latest  # mocks for tests
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest # golang-migrate CLI
 
-.PHONY: install-mock-tools
-install-mock-tools:
-	go install github.com/golang/mock/mockgen@latest  # mocks for tests
-	#go install github.com/golang/mock/gomock@latest
-
-.PHONY: install-all-tools
-install-all-tools: install-mock-tools install-pg-tools
 
 .PHONY: test
 test:
@@ -73,6 +63,35 @@ test_cover:
 #	@echo "Generating mock for Service..."
 #	mockgen -destination=internal/service/mocks/service_mock.go -package=service -source=internal/controller/grpc/grpc.go Service
 
+.PHONY: gofmt
+gofmt:
+	@gofmt -w ./..
+
+## golangci-lint
+GO_LINT_VERSION := $(shell curl -s https://api.github.com/repos/golangci/golangci-lint/releases/latest | jq -r '.tag_name')
+ifeq ($(GO_LINT_VERSION),null) # в случае если запрос нарвется на rate limit
+	GO_LINT_VERSION := 2.8.0
+else
+	GO_LINT_VERSION := $(shell echo $(GO_LINT_VERSION) | cut -c 2-)
+endif
+GO_LINT_TAR_GZ := golangci-lint-$(GO_LINT_VERSION)-linux-amd64.tar.gz
+GO_LINT_DOWNLOAD_LINK := https://github.com/golangci/golangci-lint/releases/download/v$(GO_LINT_VERSION)/$(GO_LINT_TAR_GZ)
+GO_LINT_TAR_GZ_BIN := $(patsubst %.tar.gz,%,$(GO_LINT_TAR_GZ))/golangci-lint
+GO_LINT_BIN := $(BUILD_DIR)/golangci-lint-$(GO_LINT_VERSION)
+$(GO_LINT_BIN):
+	@mkdir -p $(BUILD_DIR)
+	@wget -q --show-progress -O $(BUILD_DIR)/$(GO_LINT_TAR_GZ) $(GO_LINT_DOWNLOAD_LINK)
+	@tar -xzf $(BUILD_DIR)/$(GO_LINT_TAR_GZ) -C $(BUILD_DIR) $(GO_LINT_TAR_GZ_BIN) --strip-components=1
+	@mv $(BUILD_DIR)/golangci-lint $(GO_LINT_BIN)
+	@rm $(BUILD_DIR)/$(GO_LINT_TAR_GZ)
+###
+
+.PHONY: lint
+lint: $(GO_LINT_BIN)
+	@$(GO_LINT_BIN) run
+
+
+
 .PHONY: up
 up:
 	@sudo docker compose up -d
@@ -80,10 +99,6 @@ up:
 .PHONY: down
 down:
 	@sudo docker compose down
-
-.PHONY: gofmt
-gofmt:
-	@gofmt -w ./..
 
 CYAN := \033[36m
 BOLD := \033[1m
@@ -96,15 +111,13 @@ help:
 	@echo ""
 	@echo "command                | description"
 	@echo "===================================================="
-	@echo "install-pg-tools       | install golang-migrate CLI"
-	@echo "install-mock-tools     | install mockgen/gomock"
-	@echo "install-all-tools      | install proto/mock/pg tools"
+	@echo "install-tools          | install mock/migrate tools"
+	@echo "mock                   | generate mocks"
 	@echo "migrate-up             | apply DB migrations"
 	@echo "migrate-down           | rollback migration"
 	@echo "migrate-create         | create migration (NAME=...) "
-	@echo "mock                   | generate Storage/Service mocks"
 	@echo "test                   | run tests"
 	@echo "test_cover             | tests + coverage report"
 	@echo "gofmt                  | format all Go files"
-	@echo "build-cli              | cross-platform CLI builds"
-	@echo "build                  | build server"
+	@echo "up                     | run docker compose up -d"
+	@echo "down                   | run docker compose down"

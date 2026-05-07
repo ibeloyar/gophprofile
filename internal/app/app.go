@@ -35,8 +35,12 @@ func Run(cfg *config.Config) error {
 		return err
 	}
 
-	publisher, err := broker.NewPublisher(cfg.RabbitURL)
+	publisher, err := broker.NewPublisher(lg, cfg.RabbitURL)
 	if err != nil {
+		return err
+	}
+
+	if err := publisher.Init(); err != nil {
 		return err
 	}
 

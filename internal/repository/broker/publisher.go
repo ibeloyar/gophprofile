@@ -8,10 +8,21 @@ import (
 	"log"
 
 	"github.com/ibeloyar/gophprofile/internal/model"
+	"go.uber.org/zap"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-func NewPublisher(url string) (*Publisher, error) {
+type Publisher struct {
+	lg *zap.SugaredLogger
+
+	conn    *amqp.Connection
+	channel *amqp.Channel
+
+	confirms chan amqp.Confirmation
+}
+
+func NewPublisher(lg *zap.SugaredLogger, url string) (*Publisher, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
 		return nil, err
@@ -31,39 +42,23 @@ func NewPublisher(url string) (*Publisher, error) {
 		log.Fatalf("enable confirms: %v", err)
 	}
 
-	// Канал подтверждений
-	//confirms := ch.NotifyPublish(make(chan amqp.Confirmation, 1))
-
-	//// Создаём exchange и очередь
-	//if err := ch.ExchangeDeclare("events", "direct", true, false, false, false, nil); err != nil {
-	//	log.Fatal(err)
-	//}
-	//if _, err := ch.QueueDeclare("events.q", true, false, false, false, nil); err != nil {
-	//	log.Fatal(err)
-	//}
-	//if err := ch.QueueBind("events.q", "created", "events", false, nil); err != nil {
-	//	log.Fatal(err)
-	//}
-
-	// Публикуем сообщение с таймаутом
-	//ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	//defer cancel()
-	//
-	//select {
-	//case c := <-confirms:
-	//	if c.Ack {
-	//		log.Println("broker ACK: сообщение принято")
-	//	} else {
-	//		log.Println("broker NACK: брокер отверг публикацию, можно ретраить")
-	//	}
-	//case <-ctx.Done():
-	//	log.Println("timeout ожидания confirm — неизвестно, принято ли сообщение")
-	//}
-
 	return &Publisher{
-		conn:    conn,
-		channel: ch,
+		lg:       lg,
+		conn:     conn,
+		channel:  ch,
+		confirms: make(chan amqp.Confirmation, 1),
 	}, nil
+}
+
+func (p *Publisher) Init() error {
+	go p.handleConfirms()
+
+	// Создаём exchange
+	if err := p.channel.ExchangeDeclare(exchangeName, "direct", true, false, false, false, nil); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // Health проверяет, что соединение с RabbitMQ активно
@@ -98,11 +93,15 @@ func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUpload
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	return p.channel.PublishWithContext(ctx, exchangeName, uploadKey, false, false, amqp.Publishing{
+	if err := p.channel.PublishWithContext(ctx, exchangeName, uploadKey, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		Body:         body,
-	})
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDeleteEvent) error {
@@ -111,9 +110,24 @@ func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDelete
 		return fmt.Errorf("marshal event: %w", err)
 	}
 
-	return p.channel.PublishWithContext(ctx, exchangeName, deleteKey, false, false, amqp.Publishing{
+	if err := p.channel.PublishWithContext(ctx, exchangeName, deleteKey, false, false, amqp.Publishing{
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		Body:         body,
-	})
+	}); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (p *Publisher) handleConfirms() {
+	confirms := p.channel.NotifyPublish(p.confirms)
+	for confirm := range confirms {
+		if confirm.Ack {
+			p.lg.Debugw("message confirmed", "delivery_tag", confirm.DeliveryTag)
+		} else {
+			p.lg.Errorw("message nacked", "delivery_tag", confirm.DeliveryTag)
+		}
+	}
 }

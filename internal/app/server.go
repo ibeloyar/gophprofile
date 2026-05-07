@@ -22,6 +22,10 @@ func NewServer(lg *zap.SugaredLogger, addr string, service *service.Service) (*h
 	r.Get("/api/v1/avatars/{avatar_id}/metadata", c.GetAvatarMeta)
 	r.Delete("/api/v1/avatars/{avatar_id}", c.DeleteAvatar)
 
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, "web/static/index.html")
+	})
+
 	return &http.Server{
 		Addr:    addr,
 		Handler: r,
