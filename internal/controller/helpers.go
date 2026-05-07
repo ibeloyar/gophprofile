@@ -13,6 +13,12 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrFileRequired      = errors.New("file required")
+	ErrFileTooLarge      = errors.New("file too large")
+	ErrFileInvalidFormat = errors.New("invalid file format")
+)
+
 // readBody - reads and parses JSON and Text/Plain request body into a T struct
 func readBody[T any](r *http.Request) (T, error) {
 	var body T
@@ -65,12 +71,6 @@ func writeJSON(w http.ResponseWriter, lg *zap.SugaredLogger, data interface{}, s
 
 	w.Write(response)
 }
-
-var (
-	ErrFileRequired      = errors.New("file required")
-	ErrFileTooLarge      = errors.New("file too large")
-	ErrFileInvalidFormat = errors.New("invalid file format")
-)
 
 // readAvatarFile - read avatar file from request and return model.AvatarFile struct
 func readAvatarFile(r *http.Request) (*model.AvatarFile, error) {

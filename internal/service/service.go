@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	_ "image/jpeg" // Регистрация JPEG
-	_ "image/png"  // Регистрация PNG
+	_ "image/jpeg"
+	_ "image/png"
 
-	_ "golang.org/x/image/webp" // Если используете golang.org/x/image/webp
+	_ "golang.org/x/image/webp"
 
 	"github.com/ibeloyar/gophprofile/internal/model"
 	"go.uber.org/zap"

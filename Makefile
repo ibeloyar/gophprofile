@@ -10,10 +10,6 @@ DB_MIGRATIONS_PATH="./migrations"
 
 .DEFAULT_GOAL := help
 
-.PHONY: build
-build:
-	go build -o ./cmd/server ./cmd/server
-
 .PHONY: migrate-up
 migrate-up:
 	migrate \
@@ -99,6 +95,10 @@ up:
 .PHONY: down
 down:
 	@sudo docker compose down
+
+.PHONY: build
+build:
+	@sudo docker compose build --no-cache
 
 CYAN := \033[36m
 BOLD := \033[1m

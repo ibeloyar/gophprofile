@@ -1,18 +1,19 @@
 package broker
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/jpeg"
 
-	"github.com/disintegration/imaging"
 	"github.com/ibeloyar/gophprofile/internal/model"
+	"github.com/ibeloyar/gophprofile/pkg/resizer"
 	"go.uber.org/zap"
 
 	amqp "github.com/rabbitmq/amqp091-go"
+)
+
+const (
+	workerName = "gophprofile-worker"
 )
 
 type Storage interface {
@@ -79,8 +80,17 @@ func (c *Consumer) Run() error {
 	go c.handleUpload()
 	go c.handleDelete()
 
-	c.lg.Info("consumer running")
+	c.lg.Info(fmt.Sprintf("%s running...", workerName))
+
 	return nil
+}
+
+func (c *Consumer) Shutdown() error {
+	if err := c.channel.Close(); err != nil {
+		return err
+	}
+
+	return c.conn.Close()
 }
 
 func (c *Consumer) handleUpload() {
@@ -135,14 +145,6 @@ func (c *Consumer) handleDelete() {
 	}
 }
 
-func (c *Consumer) Shutdown() error {
-	if err := c.channel.Close(); err != nil {
-		return err
-	}
-
-	return c.conn.Close()
-}
-
 func (c *Consumer) UploadHandler(ctx context.Context, event *model.AvatarUploadEvent) error {
 	if err := c.storage.UpdateProcessingStatus(ctx, event.AvatarID, model.ProcessingOpProcessing); err != nil {
 		return err
@@ -165,7 +167,7 @@ func (c *Consumer) UploadHandler(ctx context.Context, event *model.AvatarUploadE
 
 	// Сохраняем миниатюры в S3
 	for _, thumb := range thumbnails {
-		thumbnailImageData, err := c.Resize(originalImage, thumb.width, thumb.height)
+		thumbnailImageData, err := resizer.Resize(originalImage, thumb.width, thumb.height)
 		if err != nil {
 			if err := c.storage.UpdateProcessingStatus(ctx, event.AvatarID, model.ProcessingOpFailed); err != nil {
 				return err
@@ -200,22 +202,4 @@ func (c *Consumer) DeleteHandler(ctx context.Context, event *model.AvatarDeleteE
 	}
 
 	return nil
-}
-
-func (c *Consumer) Resize(imageData []byte, width, height int) ([]byte, error) {
-	img, _, err := image.Decode(bytes.NewReader(imageData))
-	if err != nil {
-		return nil, fmt.Errorf("decode: %w", err)
-	}
-
-	resized := imaging.Resize(img, width, height, imaging.Lanczos)
-
-	buf := new(bytes.Buffer)
-
-	err = jpeg.Encode(buf, resized, &jpeg.Options{Quality: 85})
-	if err != nil {
-		return nil, fmt.Errorf("encode jpeg: %w", err)
-	}
-
-	return buf.Bytes(), nil
 }

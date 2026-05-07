@@ -14,8 +14,6 @@ import (
 )
 
 const (
-	appName = "gophprofile-worker"
-
 	shutdownTimeout = 10 * time.Second
 )
 
