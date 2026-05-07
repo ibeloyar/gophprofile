@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
+//nolint:lll
 type Storage interface {
 	Health() error
 	Shutdown() error
@@ -98,7 +99,11 @@ func (s *Service) Health() *model.HealthResponse {
 // 2. Upload original file to S3 (userID/avatarID key)
 // 3. Update DB with S3 key
 // 4. Publish async processing event to RabbitMQ
-func (s *Service) UploadAvatar(ctx context.Context, userID string, avatarFile *model.AvatarFile) (*model.AvatarCreateInfo, error) {
+func (s *Service) UploadAvatar(
+	ctx context.Context,
+	userID string,
+	avatarFile *model.AvatarFile,
+) (*model.AvatarCreateInfo, error) {
 	avatar, err := s.storage.CreateAvatar(ctx,
 		userID, avatarFile.Filename, avatarFile.ContentType,
 		avatarFile.Width, avatarFile.Height, avatarFile.Size,

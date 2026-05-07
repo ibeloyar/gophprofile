@@ -34,7 +34,7 @@ type MultipartBody struct {
 	ContentType string
 }
 
-func createPNGMultipartBody(filename string, fileSize int) MultipartBody {
+func createPNGMultipartBody(filename string) MultipartBody {
 	body := new(bytes.Buffer)
 	writer := multipart.NewWriter(body)
 
@@ -99,11 +99,11 @@ func TestUploadAvatar_Success(t *testing.T) {
 
 	httpController := createTestController(t, mockService)
 
-	body := createPNGMultipartBody("avatar.png", 1024)
+	body := createPNGMultipartBody("avatar.png")
 
-	req := httptest.NewRequest("POST", "/api/v1/avatars", body.Reader)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/avatars", body.Reader)
 	req.Header.Set("Content-Type", body.ContentType)
-	req.Header.Set("X-User-ID", "1")
+	req.Header.Set("X-User-Id", "1")
 
 	rr := httptest.NewRecorder()
 	httpController.UploadAvatar(rr, req)
@@ -118,9 +118,9 @@ func TestUploadAvatar_NoFile(t *testing.T) {
 	mockService := service.NewMockService(ctrl)
 	httpController := createTestController(t, mockService)
 
-	req := httptest.NewRequest("POST", "/api/v1/avatars", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/avatars", nil)
 	req.Header.Set("Content-Type", "multipart/form-data;boundary=")
-	req.Header.Set("X-User-ID", "1")
+	req.Header.Set("X-User-Id", "1")
 
 	rr := httptest.NewRecorder()
 	httpController.UploadAvatar(rr, req)
@@ -147,11 +147,11 @@ func TestUploadAvatar_Internal(t *testing.T) {
 
 	httpController := createTestController(t, mockService)
 
-	body := createPNGMultipartBody("avatar.png", 1024)
+	body := createPNGMultipartBody("avatar.png")
 
-	req := httptest.NewRequest("POST", "/api/v1/avatars", body.Reader)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/avatars", body.Reader)
 	req.Header.Set("Content-Type", body.ContentType)
-	req.Header.Set("X-User-ID", "1")
+	req.Header.Set("X-User-Id", "1")
 
 	rr := httptest.NewRecorder()
 	httpController.UploadAvatar(rr, req)
@@ -184,7 +184,7 @@ func TestDownloadAvatar_UserIDMissing(t *testing.T) {
 	resp := w.Result()
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
-	assert.Contains(t, string(body), "X-User-ID required")
+	assert.Contains(t, string(body), "X-User-Id required")
 }
 
 func TestDownloadAvatar_AvatarNotFound(t *testing.T) {
@@ -197,7 +197,7 @@ func TestDownloadAvatar_AvatarNotFound(t *testing.T) {
 		Return(nil, "", errors.New("key does not exist"))
 
 	r := httptest.NewRequest(http.MethodGet, "/avatars/123", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -229,7 +229,7 @@ func TestDownloadAvatar_DownloadFailed(t *testing.T) {
 		Return(nil, "", errors.New("s3 internal error"))
 
 	r := httptest.NewRequest(http.MethodGet, "/avatars/123", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -261,7 +261,7 @@ func TestDownloadAvatar_Success(t *testing.T) {
 		Return(pngData, "image/png", nil)
 
 	r := httptest.NewRequest(http.MethodGet, "/avatars/123", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -279,7 +279,6 @@ func TestDownloadAvatar_Success(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	ct := resp.Header.Get("Content-Type")
-	fmt.Println(ct)
 	assert.Contains(t, ct, "image/png")
 
 	assert.Equal(t, "max-age=86400", resp.Header.Get("Cache-Control"))
@@ -315,7 +314,7 @@ func TestGetAvatarMeta_UserIDMissing(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
 	body, _ := io.ReadAll(resp.Body)
-	assert.Contains(t, string(body), "X-User-ID required")
+	assert.Contains(t, string(body), "X-User-Id required")
 }
 
 func TestGetAvatarMeta_GetAvatarMetaError(t *testing.T) {
@@ -333,7 +332,7 @@ func TestGetAvatarMeta_GetAvatarMetaError(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodGet, "/avatars/123/meta", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -364,7 +363,7 @@ func TestGetAvatarMeta_AvatarNotFound(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodGet, "/avatars/123/meta", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -406,7 +405,7 @@ func TestGetAvatarMeta_Success(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodGet, fmt.Sprintf("/avatars/%s/meta", avatarID.String()), nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", avatarID.String())
@@ -447,7 +446,7 @@ func TestDeleteAvatar_UserIDMissing(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 
 	body, _ := io.ReadAll(resp.Body)
-	assert.Contains(t, string(body), "X-User-ID required")
+	assert.Contains(t, string(body), "X-User-Id required")
 }
 
 func TestDeleteAvatar_AvatarNotFound(t *testing.T) {
@@ -465,7 +464,7 @@ func TestDeleteAvatar_AvatarNotFound(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodDelete, "/avatars/123", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -497,7 +496,7 @@ func TestDeleteAvatar_DeleteError(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodDelete, "/avatars/123", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -528,7 +527,7 @@ func TestDeleteAvatar_Success(t *testing.T) {
 	}
 
 	r := httptest.NewRequest(http.MethodDelete, "/avatars/123", nil)
-	r.Header.Set("X-User-ID", "user1")
+	r.Header.Set("X-User-Id", "user1")
 
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("avatar_id", "123")
@@ -540,5 +539,5 @@ func TestDeleteAvatar_Success(t *testing.T) {
 	resp := w.Result()
 	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
-	assert.Equal(t, 0, len(body))
+	require.Empty(t, body)
 }

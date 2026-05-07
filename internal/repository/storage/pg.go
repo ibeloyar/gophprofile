@@ -80,7 +80,12 @@ func (s *PGStorage) Shutdown() error {
 // CreateAvatar inserts new avatar record with original file metadata.
 // Returns created avatar info with generated UUID and timestamps.
 // S3 key initially empty (set after upload).
-func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType string, width, height int, sizeBytes int64) (*model.AvatarCreateInfo, error) {
+func (s *PGStorage) CreateAvatar(
+	ctx context.Context,
+	userID, fileName, mimeType string,
+	width, height int,
+	sizeBytes int64,
+) (*model.AvatarCreateInfo, error) {
 	query := `
         INSERT INTO avatars (user_id, file_name, mime_type, size_bytes, width, height, s3_key)
         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, user_id, processing_status, created_at`
@@ -135,6 +140,7 @@ func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) 
 	)
 
 	if err != nil {
+		//nolint:nilnil
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -201,6 +207,7 @@ func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) 
 	)
 
 	if err != nil {
+		//nolint:nilnil
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}

@@ -38,7 +38,7 @@ func createTestLogger(t *testing.T) (*zap.SugaredLogger, error) {
 
 func TestReadBody_TextPlain_String_Success(t *testing.T) {
 	body := "test string"
-	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set("Content-Type", "text/plain")
 
 	got, err := readBody[string](req)
@@ -48,23 +48,23 @@ func TestReadBody_TextPlain_String_Success(t *testing.T) {
 }
 
 func TestReadBody_TextPlain_String_Empty(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", strings.NewReader(""))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	req.Header.Set("Content-Type", "text/plain")
 
 	got, err := readBody[string](req)
 
 	require.NoError(t, err)
-	assert.Equal(t, "", got)
+	require.Empty(t, got)
 }
 
 func TestReadBody_TextPlain_NonString_Fail(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", strings.NewReader("test"))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("test"))
 	req.Header.Set("Content-Type", "text/plain")
 
 	type TestStruct struct{ Field string }
 
 	_, err := readBody[TestStruct](req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read request body: text/plain")
 }
 
@@ -74,8 +74,10 @@ func TestReadBody_JSON_Success(t *testing.T) {
 	}
 	expected := TestStruct{Name: "test"}
 
-	bodyJSON, _ := json.Marshal(expected)
-	req := httptest.NewRequest("POST", "/", bytes.NewReader(bodyJSON))
+	bodyJSON, err := json.Marshal(expected)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(bodyJSON))
 	req.Header.Set("Content-Type", "application/json")
 
 	got, err := readBody[TestStruct](req)
@@ -84,24 +86,24 @@ func TestReadBody_JSON_Success(t *testing.T) {
 }
 
 func TestReadBody_JSON_Invalid_Fail(t *testing.T) {
-	req := httptest.NewRequest("POST", "/", strings.NewReader(`{"invalid": "json"`))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"invalid": "json"`))
 	req.Header.Set("Content-Type", "application/json")
 
 	type TestStruct struct{ Name string }
 
 	_, err := readBody[TestStruct](req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read request body application/json")
 }
 
 func TestReadBody_ReadError(t *testing.T) {
-	req, _ := http.NewRequest("POST", "/", errorReader{})
+	req, _ := http.NewRequest(http.MethodPost, "/", errorReader{})
 	req.Header.Set("Content-Type", "application/json")
 
 	type TestStruct struct{ Name string }
 
 	_, err := readBody[TestStruct](req)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read request body")
 }
 
@@ -111,9 +113,10 @@ func TestReadBody_NoContentType_JSON(t *testing.T) {
 	}
 	expected := TestStruct{Name: "test"}
 
-	bodyJSON, _ := json.Marshal(expected)
-	req := httptest.NewRequest("POST", "/", bytes.NewReader(bodyJSON))
-	// НЕ устанавливаем Content-Type
+	bodyJSON, err := json.Marshal(expected)
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(bodyJSON))
 
 	got, err := readBody[TestStruct](req)
 	require.NoError(t, err)
@@ -122,7 +125,7 @@ func TestReadBody_NoContentType_JSON(t *testing.T) {
 
 func TestReadBody_TextPlainWithCharset(t *testing.T) {
 	body := "test string"
-	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 
 	got, err := readBody[string](req)

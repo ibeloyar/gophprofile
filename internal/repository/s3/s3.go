@@ -71,7 +71,7 @@ func (c *Client) Upload(ctx context.Context, objectKey, contentType string, data
 	})
 
 	if err != nil {
-		return fmt.Errorf("failed to upload object: %v", err)
+		return fmt.Errorf("failed to upload object: %w", err)
 	}
 
 	return nil

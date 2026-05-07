@@ -42,6 +42,7 @@ func readBody[T any](r *http.Request) (T, error) {
 				return body, nil
 			}
 
+			//nolint:forcetypeassert
 			return any(string(bodyBytes)).(T), nil
 		default:
 			return body, fmt.Errorf("failed to read request body: %s", contentType)

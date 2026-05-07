@@ -143,7 +143,11 @@ func (c *Consumer) handleUpload() {
 			}
 
 			// Success: mark idempotent + ACK
-			if err := c.storage.UpdateProcessingStatus(context.Background(), event.AvatarID, model.ProcessingOpCompleted); err != nil {
+			if err := c.storage.UpdateProcessingStatus(
+				context.Background(),
+				event.AvatarID,
+				model.ProcessingOpCompleted,
+			); err != nil {
 				c.lg.Errorw("mark processed failed", "error", err)
 				msg.Nack(false, false)
 				break
@@ -173,7 +177,10 @@ func (c *Consumer) handleDelete() {
 			continue
 		}
 
-		if alreadyDeleted, err := c.storage.CheckAvatarThumbnailKeysIsDeleted(context.Background(), event.AvatarID); err != nil {
+		if alreadyDeleted, err := c.storage.CheckAvatarThumbnailKeysIsDeleted(
+			context.Background(),
+			event.AvatarID,
+		); err != nil {
 			c.lg.Errorf("idempotency check failed: %v", err)
 			msg.Nack(false, false)
 			continue

@@ -2,7 +2,7 @@ package controller
 
 import (
 	"context"
-	"crypto/md5"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net/http"
@@ -30,8 +30,6 @@ type Service interface {
 type Controller struct {
 	lg      *zap.SugaredLogger
 	service Service
-
-	addr string
 }
 
 func New(lg *zap.SugaredLogger, service Service) *Controller {
@@ -50,12 +48,12 @@ func (c *Controller) Health(w http.ResponseWriter, r *http.Request) {
 }
 
 // UploadAvatar handles avatar file upload.
-// Validates file size, format, extracts X-User-ID header.
+// Validates file size, format, extracts X-User-Id header.
 // Returns avatar info with processing status.
 func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
-	userID := r.Header.Get("X-User-ID")
+	userID := r.Header.Get("X-User-Id")
 	if userID == "" {
-		http.Error(w, "X-User-ID required", http.StatusBadRequest)
+		http.Error(w, "X-User-Id required", http.StatusBadRequest)
 		return
 	}
 
@@ -64,23 +62,24 @@ func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, ErrFileRequired) {
 			http.Error(w, "file required", http.StatusBadRequest)
 			return
-		} else if errors.Is(err, ErrFileTooLarge) {
+		}
+		if errors.Is(err, ErrFileTooLarge) {
 			writeJSON(w, c.lg, model.UploadAvatarSizeError{
 				Error:   "File too large",
 				MaxSize: maxFileSize,
 			}, http.StatusRequestEntityTooLarge)
 			return
-		} else if errors.Is(err, ErrFileInvalidFormat) {
+		}
+		if errors.Is(err, ErrFileInvalidFormat) {
 			writeJSON(w, c.lg, model.UploadAvatarFormatError{
 				Error:   "Invalid file format",
 				Details: fmt.Sprintf("invalid file format, supported: %s", supportedFormats),
 			}, http.StatusBadRequest)
 			return
-		} else {
-			c.lg.Error("readAvatarFile error: ", zap.Error(err))
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
 		}
+		c.lg.Error("readAvatarFile error: ", zap.Error(err))
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
 	}
 
 	avatar, err := c.service.UploadAvatar(r.Context(), userID, avatarFile)
@@ -105,9 +104,9 @@ func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 	avatarID := chi.URLParam(r, "avatar_id")
 
-	userID := r.Header.Get("X-User-ID")
+	userID := r.Header.Get("X-User-Id")
 	if userID == "" {
-		http.Error(w, "X-User-ID required", http.StatusBadRequest)
+		http.Error(w, "X-User-Id required", http.StatusBadRequest)
 		return
 	}
 
@@ -128,7 +127,7 @@ func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "max-age=86400")
 
-	etag := fmt.Sprintf("%x", md5.Sum(fileData))
+	etag := fmt.Sprintf("%x", sha256.Sum256(fileData))
 	w.Header().Set("ETag", etag)
 
 	if r.Header.Get("If-None-Match") == etag {
@@ -141,13 +140,13 @@ func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetAvatarMeta returns avatar metadata by ID.
-// Requires X-User-ID header for authorization.
+// Requires X-User-Id header for authorization.
 func (c *Controller) GetAvatarMeta(w http.ResponseWriter, r *http.Request) {
 	avatarID := chi.URLParam(r, "avatar_id")
 
-	userID := r.Header.Get("X-User-ID")
+	userID := r.Header.Get("X-User-Id")
 	if userID == "" {
-		http.Error(w, "X-User-ID required", http.StatusBadRequest)
+		http.Error(w, "X-User-Id required", http.StatusBadRequest)
 		return
 	}
 
@@ -169,14 +168,14 @@ func (c *Controller) GetAvatarMeta(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteAvatar deletes avatar by ID.
-// Requires X-User-ID header for authorization.
+// Requires X-User-Id header for authorization.
 // Returns 204 No Content on success.
 func (c *Controller) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	avatarID := chi.URLParam(r, "avatar_id")
 
-	userID := r.Header.Get("X-User-ID")
+	userID := r.Header.Get("X-User-Id")
 	if userID == "" {
-		http.Error(w, "X-User-ID required", http.StatusBadRequest)
+		http.Error(w, "X-User-Id required", http.StatusBadRequest)
 		return
 	}
 

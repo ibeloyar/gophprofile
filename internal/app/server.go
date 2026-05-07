@@ -2,6 +2,7 @@ package app
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/ibeloyar/gophprofile/internal/controller"
@@ -27,7 +28,11 @@ func NewServer(lg *zap.SugaredLogger, addr string, service *service.Service) (*h
 	})
 
 	return &http.Server{
-		Addr:    addr,
-		Handler: r,
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}, nil
 }

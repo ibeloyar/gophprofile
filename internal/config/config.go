@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net"
 	"os"
 
 	"github.com/joho/godotenv"
@@ -63,5 +64,7 @@ func buildPostgresDSN() string {
 	pass := mustEnv("DB_PASSWORD")
 	name := mustEnv("DB_NAME")
 
-	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable", user, pass, host, port, name)
+	address := net.JoinHostPort(host, port)
+
+	return fmt.Sprintf("postgres://%s:%s@%s/%s?sslmode=disable", user, pass, address, name)
 }

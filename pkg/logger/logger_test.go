@@ -43,7 +43,7 @@ func TestLoggingMiddleware(t *testing.T) {
 
 	handler := middleware(nextHandler)
 
-	req := httptest.NewRequest("GET", "/test", nil)
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -74,7 +74,7 @@ func TestLoggingMiddleware_StatusOK(t *testing.T) {
 
 	handler := middleware(nextHandler)
 
-	req := httptest.NewRequest("POST", "/ok", nil)
+	req := httptest.NewRequest(http.MethodPost, "/ok", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -100,7 +100,7 @@ func TestLoggingMiddleware_ZeroSize(t *testing.T) {
 
 	handler := middleware(nextHandler)
 
-	req := httptest.NewRequest("DELETE", "/empty", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/empty", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -127,7 +127,7 @@ func TestLoggingMiddleware_MultipleWrites(t *testing.T) {
 
 	handler := middleware(nextHandler)
 
-	req := httptest.NewRequest("GET", "/multi", nil)
+	req := httptest.NewRequest(http.MethodGet, "/multi", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -149,7 +149,7 @@ func TestLoggingResponseWriter_Write(t *testing.T) {
 
 	size, err := rw.Write([]byte("test"))
 
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	assert.Equal(t, 4, size)
 	assert.Equal(t, 4, rw.responseData.size)
 	assert.Equal(t, "test", recorder.Body.String())
@@ -189,7 +189,7 @@ func TestLoggingMiddleware_LongRequest(t *testing.T) {
 
 	handler := middleware(nextHandler)
 
-	req := httptest.NewRequest("GET", "/slow", nil)
+	req := httptest.NewRequest(http.MethodGet, "/slow", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
