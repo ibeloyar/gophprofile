@@ -224,8 +224,7 @@ func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) 
 func (s *PGStorage) SoftDeleteAvatar(ctx context.Context, avatarID, userID string) error {
 	_, err := s.db.ExecContext(ctx, `
         UPDATE avatars 
-        SET thumbnail_s3_keys = NULL,
-            deleted_at = NOW(),
+        SET deleted_at = NOW(),
             updated_at = NOW()
         WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
     `, avatarID, userID)
@@ -258,6 +257,57 @@ func (s *PGStorage) SetThumbnailsData(ctx context.Context, avatarID string, avat
         WHERE id = $2 AND deleted_at IS NULL RETURNING id`
 
 	err := s.db.QueryRowContext(ctx, query, avatarThumbnails, avatarID).Scan(&id)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// AvatarResizeIsProcessed checks if avatar resize processing is currently active.
+// Returns true if processing_status = 'processing' for given avatar ID.
+// Used for idempotency - prevents duplicate thumbnail processing.
+func (s *PGStorage) AvatarResizeIsProcessed(ctx context.Context, avatarID string) (bool, error) {
+	var processingStatus model.ProcessingOp
+
+	query := `SELECT processing_status FROM avatars WHERE id = $1 AND deleted_at IS NULL`
+
+	if err := s.db.QueryRowContext(ctx, query, avatarID).Scan(&processingStatus); err != nil {
+		return false, err
+	}
+
+	return processingStatus == model.ProcessingOpProcessing, nil
+}
+
+// CheckAvatarThumbnailKeysIsDeleted checks if avatar thumbnails are already deleted or avatar soft-deleted.
+// Returns true if thumbnail_s3_keys IS NULL OR deleted_at IS NOT NULL.
+func (s *PGStorage) CheckAvatarThumbnailKeysIsDeleted(ctx context.Context, avatarID string) (bool, error) {
+	var (
+		thumbnailKeys *[]byte
+		deletedAt     *time.Time
+	)
+
+	query := `SELECT thumbnail_s3_keys, deleted_at FROM avatars WHERE id = $1`
+
+	err := s.db.QueryRowContext(ctx, query, avatarID).Scan(&thumbnailKeys, &deletedAt)
+	if err != nil {
+		return false, err
+	}
+
+	thumbnailsDeleted := thumbnailKeys == nil || len(*thumbnailKeys) == 0
+	avatarDeleted := deletedAt != nil
+
+	return thumbnailsDeleted && avatarDeleted, nil
+}
+
+// DeleteAvatarThumbnailsData clears thumbnail_s3_keys JSONB field to NULL.
+func (s *PGStorage) DeleteAvatarThumbnailsData(ctx context.Context, avatarID string) error {
+	var id string
+
+	query := `UPDATE avatars SET thumbnail_s3_keys = NULL, updated_at = NOW() WHERE id = $1 RETURNING id`
+
+	err := s.db.QueryRowContext(ctx, query, avatarID).Scan(&id)
 
 	if err != nil {
 		return err

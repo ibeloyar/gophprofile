@@ -114,7 +114,7 @@ func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 	fileData, _, err := c.service.DownloadAvatar(r.Context(), avatarID, userID)
 	if err != nil {
 		if strings.Contains(err.Error(), "key does not exist") {
-			writeJSON(w, c.lg, &model.DownloadAvatarNotFoundError{
+			writeJSON(w, c.lg, &model.AvatarNotFoundError{
 				Error: "Avatar not found",
 			}, http.StatusNotFound)
 			return
@@ -158,6 +158,13 @@ func (c *Controller) GetAvatarMeta(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if avatar == nil {
+		writeJSON(w, c.lg, &model.AvatarNotFoundError{
+			Error: "Avatar not found",
+		}, http.StatusNotFound)
+		return
+	}
+
 	writeJSON(w, c.lg, avatar, http.StatusOK)
 }
 
@@ -174,6 +181,19 @@ func (c *Controller) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := c.service.DeleteAvatar(r.Context(), avatarID, userID); err != nil {
+		if errors.Is(err, model.ErrAvatarNotFound) {
+			writeJSON(w, c.lg, &model.AvatarNotFoundError{
+				Error: "Avatar not found",
+			}, http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, model.ErrForbidden) {
+			writeJSON(w, c.lg, &model.AvatarForbiddenError{
+				Error:   "Forbidden",
+				Details: "You can only delete your own avatars",
+			}, http.StatusNotFound)
+			return
+		}
 		c.lg.Error("failed to delete avatar", zap.Error(err))
 		http.Error(w, "failed to delete avatar", http.StatusInternalServerError)
 		return

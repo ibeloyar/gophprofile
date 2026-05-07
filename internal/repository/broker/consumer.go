@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/ibeloyar/gophprofile/internal/model"
 	"github.com/ibeloyar/gophprofile/pkg/resizer"
@@ -14,11 +15,16 @@ import (
 
 const (
 	workerName = "gophprofile-worker"
+
+	maxHandleRetries = 3
 )
 
 type Storage interface {
 	UpdateProcessingStatus(ctx context.Context, avatarID string, status model.ProcessingOp) error
 	SetThumbnailsData(ctx context.Context, avatarID string, avatarThumbnails []byte) error
+	DeleteAvatarThumbnailsData(ctx context.Context, avatarID string) error
+	AvatarResizeIsProcessed(ctx context.Context, avatarID string) (bool, error)
+	CheckAvatarThumbnailKeysIsDeleted(ctx context.Context, avatarID string) (bool, error)
 }
 
 type S3Storage interface {
@@ -105,18 +111,48 @@ func (c *Consumer) handleUpload() {
 		var event model.AvatarUploadEvent
 
 		if err := json.Unmarshal(msg.Body, &event); err != nil {
-			c.lg.Errorf("unmarshal upload event: %v", err)
+			c.lg.Errorf("unmarshal: %v", err)
 			msg.Nack(false, false)
 			continue
 		}
 
-		if err := c.UploadHandler(context.Background(), &event); err != nil {
-			c.lg.Errorf("upload handler error: %v", err)
+		if alreadyProcessed, err := c.storage.AvatarResizeIsProcessed(context.Background(), event.AvatarID); err != nil {
+			c.lg.Errorf("idempotency check failed: %v", err)
 			msg.Nack(false, false)
+			continue
+		} else if alreadyProcessed {
+			c.lg.Infow("duplicate message skipped", "avatar_id", event.AvatarID, "message_id", event.MessageID)
+			msg.Ack(false)
 			continue
 		}
 
-		msg.Ack(false)
+		// Retry with exponential backoff
+		for attempt := 1; attempt <= maxHandleRetries; attempt++ {
+			if err := c.UploadHandler(context.Background(), &event); err != nil {
+				backoff := time.Duration(1<<uint(attempt)) * time.Second // 2s, 4s, 8s
+
+				c.lg.Warnw("upload attempt failed", "attempt", attempt, "error", err, "backoff", backoff)
+
+				if attempt == maxHandleRetries {
+					// Final failure → Dead Letter Queue (DLQ)
+					msg.Nack(false, true) // requeue=false
+					break
+				}
+				time.Sleep(backoff)
+				continue
+			}
+
+			// Success: mark idempotent + ACK
+			if err := c.storage.UpdateProcessingStatus(context.Background(), event.AvatarID, model.ProcessingOpCompleted); err != nil {
+				c.lg.Errorw("mark processed failed", "error", err)
+				msg.Nack(false, false)
+				break
+			}
+
+			msg.Ack(false)
+
+			break
+		}
 	}
 }
 
@@ -132,18 +168,56 @@ func (c *Consumer) handleDelete() {
 		var event model.AvatarDeleteEvent
 
 		if err := json.Unmarshal(msg.Body, &event); err != nil {
-			c.lg.Errorf("unmarshal delete event: %v", err)
+			c.lg.Errorf("failed to unmarshal delete event: %v", err)
 			msg.Nack(false, false)
 			continue
 		}
 
-		if err := c.DeleteHandler(context.Background(), &event); err != nil {
-			c.lg.Errorf("delete handler error: %v", err)
+		if alreadyDeleted, err := c.storage.CheckAvatarThumbnailKeysIsDeleted(context.Background(), event.AvatarID); err != nil {
+			c.lg.Errorf("idempotency check failed: %v", err)
 			msg.Nack(false, false)
+			continue
+		} else if alreadyDeleted {
+			c.lg.Infow("duplicate delete skipped", "avatar_id", event.AvatarID, "message_id", event.MessageID)
+			msg.Ack(false)
 			continue
 		}
 
-		msg.Ack(false)
+		// Retry with exponential backoff
+		const maxRetries = 3
+		for attempt := 1; attempt <= maxRetries; attempt++ {
+			if err := c.DeleteHandler(context.Background(), &event); err != nil {
+				backoff := time.Duration(1<<uint(attempt)) * time.Second // 2s, 4s, 8s
+
+				c.lg.Warnw("delete attempt failed",
+					"attempt", attempt, "max_retries", maxRetries,
+					"error", err, "backoff", backoff,
+					"avatar_id", event.AvatarID)
+
+				if attempt == maxRetries {
+					c.lg.Errorw("max retries exceeded, sending to DLQ", "avatar_id", event.AvatarID)
+					msg.Nack(false, true) // requeue=false → DLQ
+					break
+				}
+				time.Sleep(backoff)
+				continue
+			}
+
+			if markErr := c.storage.DeleteAvatarThumbnailsData(context.Background(), event.AvatarID); markErr != nil {
+				c.lg.Errorw("failed to mark delete processed", "error", markErr, "avatar_id", event.AvatarID)
+				msg.Nack(false, false)
+				break
+			}
+
+			c.lg.Infow("delete processed successfully",
+				"avatar_id", event.AvatarID,
+				"s3_keys_deleted", len(event.S3Keys),
+				"message_id", event.MessageID)
+
+			msg.Ack(false)
+
+			break
+		}
 	}
 }
 

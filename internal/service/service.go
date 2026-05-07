@@ -163,11 +163,11 @@ func (s *Service) DeleteAvatar(ctx context.Context, avatarID, userID string) err
 		return err
 	}
 	if avatar == nil {
-		return errors.New("not found")
+		return model.ErrAvatarNotFound
 	}
 
 	if avatar.UserID != userID {
-		return errors.New("not allowed")
+		return model.ErrForbidden
 	}
 
 	if err := s.storage.SoftDeleteAvatar(ctx, avatarID, userID); err != nil {

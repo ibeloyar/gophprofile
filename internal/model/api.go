@@ -14,11 +14,11 @@ type UploadAvatarSizeError struct {
 	MaxSize int64  `json:"max_size"`
 }
 
-type DownloadAvatarNotFoundError struct {
+type AvatarNotFoundError struct {
 	Error string `json:"error"`
 }
 
-type DeleteAvatarForbiddenError struct {
+type AvatarForbiddenError struct {
 	Error   string `json:"error"`
 	Details string `json:"details"`
 }

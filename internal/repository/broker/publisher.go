@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/google/uuid"
 	"github.com/ibeloyar/gophprofile/internal/model"
 	"go.uber.org/zap"
 
@@ -89,6 +90,8 @@ func (p *Publisher) Shutdown() error {
 // PublishUpload publishes avatar upload event to 'avatars.exchange' with upload routing key.
 // Message is persistent and confirmed before return.
 func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUploadEvent) error {
+	event.MessageID = uuid.New().String()
+
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
@@ -98,6 +101,7 @@ func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUpload
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		Body:         body,
+		MessageId:    event.MessageID,
 	}); err != nil {
 		return err
 	}
@@ -108,6 +112,8 @@ func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUpload
 // PublishDelete publishes avatar delete event to 'avatars.exchange' with delete routing key.
 // Message is persistent and confirmed before return.
 func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDeleteEvent) error {
+	event.MessageID = uuid.New().String()
+
 	body, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
@@ -117,6 +123,7 @@ func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDelete
 		ContentType:  "application/json",
 		DeliveryMode: amqp.Persistent,
 		Body:         body,
+		MessageId:    event.MessageID,
 	}); err != nil {
 		return err
 	}
