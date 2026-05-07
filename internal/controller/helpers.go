@@ -98,7 +98,7 @@ func readAvatarFile(r *http.Request) (*model.AvatarFile, error) {
 		return nil, ErrFileTooLarge
 	}
 
-	// Перематываем file в начало для getDimensions
+	// Rewind file to the beginning for getDimensions
 	file.Seek(0, 0)
 	dimensions, err := getDimensions(file)
 	if err != nil {

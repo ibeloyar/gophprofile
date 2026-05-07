@@ -41,12 +41,17 @@ func New(lg *zap.SugaredLogger, service Service) *Controller {
 	}
 }
 
+// Health handles health check endpoint.
+// Returns application health status as JSON.
 func (c *Controller) Health(w http.ResponseWriter, r *http.Request) {
 	response := c.service.Health()
 
 	writeJSON(w, c.lg, response, http.StatusOK)
 }
 
+// UploadAvatar handles avatar file upload.
+// Validates file size, format, extracts X-User-ID header.
+// Returns avatar info with processing status.
 func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	userID := r.Header.Get("X-User-ID")
 	if userID == "" {
@@ -94,6 +99,9 @@ func (c *Controller) UploadAvatar(w http.ResponseWriter, r *http.Request) {
 	}, http.StatusCreated)
 }
 
+// DownloadAvatar serves avatar file by ID.
+// Supports ETag caching with MD5 content hash.
+// Returns 304 Not Modified if ETag matches.
 func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 	avatarID := chi.URLParam(r, "avatar_id")
 
@@ -116,16 +124,13 @@ func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Установка заголовков
 	contentType := http.DetectContentType(fileData)
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Cache-Control", "max-age=86400")
 
-	// Генерация ETag на основе содержимого (например, через MD5)
 	etag := fmt.Sprintf("%x", md5.Sum(fileData))
 	w.Header().Set("ETag", etag)
 
-	// Проверка If-None-Match для поддержки кэширования
 	if r.Header.Get("If-None-Match") == etag {
 		w.WriteHeader(http.StatusNotModified)
 		return
@@ -135,6 +140,8 @@ func (c *Controller) DownloadAvatar(w http.ResponseWriter, r *http.Request) {
 	w.Write(fileData)
 }
 
+// GetAvatarMeta returns avatar metadata by ID.
+// Requires X-User-ID header for authorization.
 func (c *Controller) GetAvatarMeta(w http.ResponseWriter, r *http.Request) {
 	avatarID := chi.URLParam(r, "avatar_id")
 
@@ -154,6 +161,9 @@ func (c *Controller) GetAvatarMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, c.lg, avatar, http.StatusOK)
 }
 
+// DeleteAvatar deletes avatar by ID.
+// Requires X-User-ID header for authorization.
+// Returns 204 No Content on success.
 func (c *Controller) DeleteAvatar(w http.ResponseWriter, r *http.Request) {
 	avatarID := chi.URLParam(r, "avatar_id")
 

@@ -9,6 +9,11 @@ import (
 	"github.com/disintegration/imaging"
 )
 
+// Resize decodes image bytes and generates square thumbnail.
+// Uses Lanczos resampling for high quality. Outputs JPEG at 85% quality.
+//
+// Supported formats: JPEG, PNG, WEBP (via image.Decode).
+// Returns resized image bytes or error.
 func Resize(imageData []byte, width, height int) ([]byte, error) {
 	img, _, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {

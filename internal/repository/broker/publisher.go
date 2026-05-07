@@ -22,6 +22,7 @@ type Publisher struct {
 	confirms chan amqp.Confirmation
 }
 
+// NewPublisher establishes RabbitMQ connection and channel with confirms enabled.
 func NewPublisher(lg *zap.SugaredLogger, url string) (*Publisher, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
@@ -50,10 +51,10 @@ func NewPublisher(lg *zap.SugaredLogger, url string) (*Publisher, error) {
 	}, nil
 }
 
+// Init declares 'avatars.exchange' (direct, durable) and starts confirm handler.
 func (p *Publisher) Init() error {
 	go p.handleConfirms()
 
-	// Создаём exchange
 	if err := p.channel.ExchangeDeclare(exchangeName, "direct", true, false, false, false, nil); err != nil {
 		return err
 	}
@@ -61,13 +62,11 @@ func (p *Publisher) Init() error {
 	return nil
 }
 
-// Health проверяет, что соединение с RabbitMQ активно
+// Health checks RabbitMQ connection and channel status.
 func (p *Publisher) Health() error {
 	if p.conn == nil || p.conn.IsClosed() {
 		return errors.New("rabbitMQ connection is closed")
 	}
-
-	// Дополнительно можно проверить канал
 	if p.channel == nil || p.channel.IsClosed() {
 		return errors.New("rabbitMQ channel is closed")
 	}
@@ -75,11 +74,11 @@ func (p *Publisher) Health() error {
 	return nil
 }
 
+// Shutdown closes channel and connection gracefully.
 func (p *Publisher) Shutdown() error {
 	if err := p.channel.Close(); err != nil {
 		return err
 	}
-
 	if err := p.conn.Close(); err != nil {
 		return err
 	}
@@ -87,6 +86,8 @@ func (p *Publisher) Shutdown() error {
 	return nil
 }
 
+// PublishUpload publishes avatar upload event to 'avatars.exchange' with upload routing key.
+// Message is persistent and confirmed before return.
 func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUploadEvent) error {
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -104,6 +105,8 @@ func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUpload
 	return nil
 }
 
+// PublishDelete publishes avatar delete event to 'avatars.exchange' with delete routing key.
+// Message is persistent and confirmed before return.
 func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDeleteEvent) error {
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -121,6 +124,8 @@ func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDelete
 	return nil
 }
 
+// handleConfirms processes publisher confirmations asynchronously.
+// Logs ACK/NACK for each message with delivery tag.
 func (p *Publisher) handleConfirms() {
 	confirms := p.channel.NotifyPublish(p.confirms)
 	for confirm := range confirms {

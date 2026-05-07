@@ -10,6 +10,25 @@ DB_MIGRATIONS_PATH="./migrations"
 
 .DEFAULT_GOAL := help
 
+## golangci-lint
+GO_LINT_VERSION := $(shell curl -s https://api.github.com/repos/golangci/golangci-lint/releases/latest | jq -r '.tag_name')
+ifeq ($(GO_LINT_VERSION),null) # в случае если запрос нарвется на rate limit
+	GO_LINT_VERSION := 2.8.0
+else
+	GO_LINT_VERSION := $(shell echo $(GO_LINT_VERSION) | cut -c 2-)
+endif
+GO_LINT_TAR_GZ := golangci-lint-$(GO_LINT_VERSION)-linux-amd64.tar.gz
+GO_LINT_DOWNLOAD_LINK := https://github.com/golangci/golangci-lint/releases/download/v$(GO_LINT_VERSION)/$(GO_LINT_TAR_GZ)
+GO_LINT_TAR_GZ_BIN := $(patsubst %.tar.gz,%,$(GO_LINT_TAR_GZ))/golangci-lint
+GO_LINT_BIN := $(BUILD_DIR)/golangci-lint-$(GO_LINT_VERSION)
+$(GO_LINT_BIN):
+	@mkdir -p $(BUILD_DIR)
+	@wget -q --show-progress -O $(BUILD_DIR)/$(GO_LINT_TAR_GZ) $(GO_LINT_DOWNLOAD_LINK)
+	@tar -xzf $(BUILD_DIR)/$(GO_LINT_TAR_GZ) -C $(BUILD_DIR) $(GO_LINT_TAR_GZ_BIN) --strip-components=1
+	@mv $(BUILD_DIR)/golangci-lint $(GO_LINT_BIN)
+	@rm $(BUILD_DIR)/$(GO_LINT_TAR_GZ)
+###
+
 .PHONY: migrate-up
 migrate-up:
 	migrate \
@@ -34,12 +53,10 @@ else
 	@echo "Require variable NAME not found"
 endif
 
-
 .PHONY: install-tools
 install-tools:
 	go install github.com/golang/mock/mockgen@latest  # mocks for tests
 	go install -tags 'postgres' github.com/golang-migrate/migrate/v4/cmd/migrate@latest # golang-migrate CLI
-
 
 .PHONY: test
 test:
@@ -63,30 +80,9 @@ test_cover:
 gofmt:
 	@gofmt -w ./..
 
-## golangci-lint
-GO_LINT_VERSION := $(shell curl -s https://api.github.com/repos/golangci/golangci-lint/releases/latest | jq -r '.tag_name')
-ifeq ($(GO_LINT_VERSION),null) # в случае если запрос нарвется на rate limit
-	GO_LINT_VERSION := 2.8.0
-else
-	GO_LINT_VERSION := $(shell echo $(GO_LINT_VERSION) | cut -c 2-)
-endif
-GO_LINT_TAR_GZ := golangci-lint-$(GO_LINT_VERSION)-linux-amd64.tar.gz
-GO_LINT_DOWNLOAD_LINK := https://github.com/golangci/golangci-lint/releases/download/v$(GO_LINT_VERSION)/$(GO_LINT_TAR_GZ)
-GO_LINT_TAR_GZ_BIN := $(patsubst %.tar.gz,%,$(GO_LINT_TAR_GZ))/golangci-lint
-GO_LINT_BIN := $(BUILD_DIR)/golangci-lint-$(GO_LINT_VERSION)
-$(GO_LINT_BIN):
-	@mkdir -p $(BUILD_DIR)
-	@wget -q --show-progress -O $(BUILD_DIR)/$(GO_LINT_TAR_GZ) $(GO_LINT_DOWNLOAD_LINK)
-	@tar -xzf $(BUILD_DIR)/$(GO_LINT_TAR_GZ) -C $(BUILD_DIR) $(GO_LINT_TAR_GZ_BIN) --strip-components=1
-	@mv $(BUILD_DIR)/golangci-lint $(GO_LINT_BIN)
-	@rm $(BUILD_DIR)/$(GO_LINT_TAR_GZ)
-###
-
 .PHONY: lint
 lint: $(GO_LINT_BIN)
 	@$(GO_LINT_BIN) run
-
-
 
 .PHONY: up
 up:
@@ -121,3 +117,4 @@ help:
 	@echo "gofmt                  | format all Go files"
 	@echo "up                     | run docker compose up -d"
 	@echo "down                   | run docker compose down"
+	@echo "build                  | build docker images"

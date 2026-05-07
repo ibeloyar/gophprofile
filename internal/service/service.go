@@ -47,6 +47,7 @@ type Service struct {
 	publisher Publisher
 }
 
+// New creates service instance wiring all dependencies.
 func New(lg *zap.SugaredLogger, storage Storage, s3 S3Storage, publisher Publisher) *Service {
 	return &Service{
 		lg:        lg,
@@ -56,11 +57,11 @@ func New(lg *zap.SugaredLogger, storage Storage, s3 S3Storage, publisher Publish
 	}
 }
 
+// Shutdown closes storage and publisher resources gracefully.
 func (s *Service) Shutdown() error {
 	if err := s.storage.Shutdown(); err != nil {
 		return err
 	}
-
 	if err := s.publisher.Shutdown(); err != nil {
 		return err
 	}
@@ -68,6 +69,8 @@ func (s *Service) Shutdown() error {
 	return nil
 }
 
+// Health performs composite health check across all dependencies.
+// Returns status object with individual component states.
 func (s *Service) Health() *model.HealthResponse {
 	response := &model.HealthResponse{
 		Postgresql: true,
@@ -90,6 +93,11 @@ func (s *Service) Health() *model.HealthResponse {
 	return response
 }
 
+// UploadAvatar implements full upload flow:
+// 1. Persist avatar metadata to DB (pending status)
+// 2. Upload original file to S3 (userID/avatarID key)
+// 3. Update DB with S3 key
+// 4. Publish async processing event to RabbitMQ
 func (s *Service) UploadAvatar(ctx context.Context, userID string, avatarFile *model.AvatarFile) (*model.AvatarCreateInfo, error) {
 	avatar, err := s.storage.CreateAvatar(ctx,
 		userID, avatarFile.Filename, avatarFile.ContentType,
@@ -121,6 +129,8 @@ func (s *Service) UploadAvatar(ctx context.Context, userID string, avatarFile *m
 	return avatar, nil
 }
 
+// DownloadAvatar downloads original avatar file directly from S3.
+// Constructs object key from userID/avatarID.
 func (s *Service) DownloadAvatar(ctx context.Context, avatarID, userID string) ([]byte, string, error) {
 	objectKey := fmt.Sprintf("%s/%s", userID, avatarID)
 
@@ -132,6 +142,7 @@ func (s *Service) DownloadAvatar(ctx context.Context, avatarID, userID string) (
 	return fileData, contentType, err
 }
 
+// GetAvatarMeta retrieves avatar metadata including processed thumbnails.
 func (s *Service) GetAvatarMeta(ctx context.Context, avatarID, userID string) (*model.AvatarMeta, error) {
 	avatar, err := s.storage.GetAvatarMeta(ctx, avatarID, userID)
 	if err != nil {
@@ -141,6 +152,11 @@ func (s *Service) GetAvatarMeta(ctx context.Context, avatarID, userID string) (*
 	return avatar, nil
 }
 
+// DeleteAvatar implements soft-delete with async cleanup:
+// 1. Fetch avatar and authorize owner
+// 2. Soft-delete in DB (clear thumbnails, set deleted_at)
+// 3. Parse thumbnail keys from JSONB
+// 4. Publish delete event for S3 cleanup (original + thumbnails)
 func (s *Service) DeleteAvatar(ctx context.Context, avatarID, userID string) error {
 	avatar, err := s.storage.GetAvatarByID(ctx, avatarID, userID)
 	if err != nil {
@@ -179,6 +195,8 @@ func (s *Service) DeleteAvatar(ctx context.Context, avatarID, userID string) err
 	return nil
 }
 
+// parseThumbnailUrls converts thumbnail JSONB map to full S3 object keys.
+// Prefixes each URL with userID/ (e.g. "user1/avatar_100x100").
 func parseThumbnailUrls(userID string, raw *json.RawMessage) ([]string, error) {
 	if raw == nil {
 		return nil, nil

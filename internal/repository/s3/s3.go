@@ -20,6 +20,7 @@ type Client struct {
 	bucket string
 }
 
+// New creates MinIO client, checks/creates "avatars" bucket if missing.
 func New(endpoint, accessKey, secretKey string) (*Client, error) {
 	client, err := minio.New(endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
@@ -46,6 +47,8 @@ func New(endpoint, accessKey, secretKey string) (*Client, error) {
 	}, nil
 }
 
+// Health performs MinIO health check with 5s timeout.
+// Returns error if client offline or health check fails.
 func (c *Client) Health() error {
 	cancel, err := c.client.HealthCheck(5 * time.Second)
 	if err != nil {
@@ -60,6 +63,8 @@ func (c *Client) Health() error {
 	return nil
 }
 
+// Upload stores object in "avatars" bucket with specified content type.
+// Supports streaming via io.Reader for large files.
 func (c *Client) Upload(ctx context.Context, objectKey, contentType string, data []byte) error {
 	_, err := c.client.PutObject(ctx, c.bucket, objectKey, bytes.NewReader(data), int64(len(data)), minio.PutObjectOptions{
 		ContentType: contentType,
@@ -72,6 +77,8 @@ func (c *Client) Upload(ctx context.Context, objectKey, contentType string, data
 	return nil
 }
 
+// Download retrieves object from "avatars" bucket by key.
+// Returns file bytes and content type. Closes object automatically.
 func (c *Client) Download(ctx context.Context, objectKey string) ([]byte, string, error) {
 	obj, err := c.client.GetObject(ctx, c.bucket, objectKey, minio.GetObjectOptions{})
 	if err != nil {
@@ -92,6 +99,8 @@ func (c *Client) Download(ctx context.Context, objectKey string) ([]byte, string
 	return data, info.ContentType, nil
 }
 
+// DeleteObjects removes multiple objects from "avatars" bucket concurrently.
+// Returns on first error, logs individual failures.
 func (c *Client) DeleteObjects(ctx context.Context, objectKeys []string) error {
 	if len(objectKeys) == 0 {
 		return nil

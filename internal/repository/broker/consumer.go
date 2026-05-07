@@ -35,6 +35,7 @@ type Consumer struct {
 	s3      S3Storage
 }
 
+// NewConsumer creates and initializes RabbitMQ consumer connection.
 func NewConsumer(lg *zap.SugaredLogger, url string, storage Storage, s3 S3Storage) (*Consumer, error) {
 	conn, err := amqp.Dial(url)
 	if err != nil {
@@ -56,23 +57,21 @@ func NewConsumer(lg *zap.SugaredLogger, url string, storage Storage, s3 S3Storag
 	}, nil
 }
 
+// Run declares queues/bindings, sets QoS, starts upload/delete goroutines.
+// Blocks until Shutdown called. Logs worker startup.
 func (c *Consumer) Run() error {
-	// Объявляем очереди
 	if _, err := c.channel.QueueDeclare(uploadQueue, true, false, false, false, nil); err != nil {
 		return err
 	}
 	if _, err := c.channel.QueueDeclare(deleteQueue, true, false, false, false, nil); err != nil {
 		return err
 	}
-
-	// Bind queues to exchange
 	if err := c.channel.QueueBind(uploadQueue, uploadKey, exchangeName, false, nil); err != nil {
 		return err
 	}
 	if err := c.channel.QueueBind(deleteQueue, deleteKey, exchangeName, false, nil); err != nil {
 		return err
 	}
-
 	if err := c.channel.Qos(10, 0, false); err != nil {
 		return err
 	}
@@ -85,6 +84,7 @@ func (c *Consumer) Run() error {
 	return nil
 }
 
+// Shutdown closes RabbitMQ channel and connection gracefully.
 func (c *Consumer) Shutdown() error {
 	if err := c.channel.Close(); err != nil {
 		return err
@@ -93,6 +93,7 @@ func (c *Consumer) Shutdown() error {
 	return c.conn.Close()
 }
 
+// handleUpload consumes from upload queue, processes avatar thumbnails.
 func (c *Consumer) handleUpload() {
 	msgs, err := c.channel.Consume(uploadQueue, "upload-worker", false, false, false, false, nil)
 	if err != nil {
@@ -119,6 +120,7 @@ func (c *Consumer) handleUpload() {
 	}
 }
 
+// handleDelete consumes from delete queue, removes S3 objects.
 func (c *Consumer) handleDelete() {
 	msgs, err := c.channel.Consume(deleteQueue, "delete-worker", false, false, false, false, nil)
 	if err != nil {
@@ -145,6 +147,12 @@ func (c *Consumer) handleDelete() {
 	}
 }
 
+// UploadHandler processes avatar upload event:
+// 1. Updates status to Processing
+// 2. Downloads original from S3
+// 3. Generates 100x100 and 300x300 thumbnails
+// 4. Uploads thumbnails to S3
+// 5. Stores thumbnails metadata in DB
 func (c *Consumer) UploadHandler(ctx context.Context, event *model.AvatarUploadEvent) error {
 	if err := c.storage.UpdateProcessingStatus(ctx, event.AvatarID, model.ProcessingOpProcessing); err != nil {
 		return err
@@ -165,7 +173,6 @@ func (c *Consumer) UploadHandler(ctx context.Context, event *model.AvatarUploadE
 
 	avatarThumbnailsMap := make(map[string]string)
 
-	// Сохраняем миниатюры в S3
 	for _, thumb := range thumbnails {
 		thumbnailImageData, err := resizer.Resize(originalImage, thumb.width, thumb.height)
 		if err != nil {
@@ -196,6 +203,7 @@ func (c *Consumer) UploadHandler(ctx context.Context, event *model.AvatarUploadE
 	return c.storage.SetThumbnailsData(ctx, event.AvatarID, avatarThumbnails)
 }
 
+// DeleteHandler removes avatar files from S3 storage.
 func (c *Consumer) DeleteHandler(ctx context.Context, event *model.AvatarDeleteEvent) error {
 	if err := c.s3.DeleteObjects(ctx, event.S3Keys); err != nil {
 		return err

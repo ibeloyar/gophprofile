@@ -22,16 +22,16 @@ const (
 	migrationsPath  = "./migrations"
 )
 
-// PGStorage wraps sql.DB with PostgreSQL connection pool and migration management.
 type PGStorage struct {
 	db *sql.DB
 }
 
-// New creates PostgreSQL storage with automatic schema migrations.
-// 1. Establishes pgx connection pool
-// 2. Initializes migration driver with schema_migrations table
-// 3. Applies all pending migrations from ./migrations directory
-// 4. Returns sql.DB compatible storage instance
+// New initializes PostgreSQL storage with automatic migrations.
+// 1. Creates pgx connection pool from DSN
+// 2. Sets up migration driver with custom migrations table
+// 3. Resolves absolute path to ./migrations directory
+// 4. Applies all pending migrations (ignores ErrNoChange)
+// 5. Returns sql.DB wrapper for standard queries
 func New(connStr string) (*PGStorage, error) {
 	pool, err := pgxpool.New(context.Background(), connStr)
 	if err != nil {
@@ -67,17 +67,19 @@ func New(connStr string) (*PGStorage, error) {
 	}, nil
 }
 
-// Health db health check (Ping)
+// Health performs database ping to verify connection.
 func (s *PGStorage) Health() error {
 	return s.db.Ping()
 }
 
-// Shutdown closes database connection pool gracefully.
-// Call during application shutdown to release resources.
+// Shutdown closes underlying connection pool gracefully.
 func (s *PGStorage) Shutdown() error {
 	return s.db.Close()
 }
 
+// CreateAvatar inserts new avatar record with original file metadata.
+// Returns created avatar info with generated UUID and timestamps.
+// S3 key initially empty (set after upload).
 func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType string, width, height int, sizeBytes int64) (*model.AvatarCreateInfo, error) {
 	query := `
         INSERT INTO avatars (user_id, file_name, mime_type, size_bytes, width, height, s3_key)
@@ -94,6 +96,8 @@ func (s *PGStorage) CreateAvatar(ctx context.Context, userID, fileName, mimeType
 	return avatar, nil
 }
 
+// UpdateAvatarS3Key updates avatar with S3 object key after successful upload.
+// Sets upload_status='uploaded' and updates timestamp.
 func (s *PGStorage) UpdateAvatarS3Key(ctx context.Context, id string, s3Key string) error {
 	query := `UPDATE avatars SET s3_key = $1, upload_status = 'uploaded', updated_at = NOW() WHERE id = $2`
 
@@ -102,17 +106,20 @@ func (s *PGStorage) UpdateAvatarS3Key(ctx context.Context, id string, s3Key stri
 	return err
 }
 
+// GetAvatarMeta retrieves avatar metadata by ID and user.
+// Joins thumbnails JSONB, handles nullable dimensions, filters soft-deleted.
+// Returns populated AvatarMeta with thumbnails slice.
 func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) (*model.AvatarMeta, error) {
-	query := `
-        SELECT id, user_id, file_name, mime_type, size_bytes, width, height, thumbnail_s3_keys, created_at, updated_at
-        FROM avatars WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
-
 	var (
 		avatar          model.AvatarMeta
 		widthPtr        *int
 		heightPtr       *int
-		thumbnailsBytes []byte // Временный буфер для JSONB данных
+		thumbnailsBytes []byte
 	)
+
+	query := `
+        SELECT id, user_id, file_name, mime_type, size_bytes, width, height, thumbnail_s3_keys, created_at, updated_at
+        FROM avatars WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
 
 	err := s.db.QueryRowContext(ctx, query, avatarID, userID).Scan(
 		&avatar.ID,
@@ -162,7 +169,14 @@ func (s *PGStorage) GetAvatarMeta(ctx context.Context, avatarID, userID string) 
 	return &avatar, nil
 }
 
+// GetAvatarByID fetches complete avatar record by ID and user.
+// Includes all fields including nullable deleted_at and thumbnails JSONB.
 func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) (*model.Avatar, error) {
+	var (
+		thumbnailsBytes []byte
+		deletedAtPtr    *time.Time
+	)
+
 	query := `
         SELECT id, user_id, file_name, mime_type, size_bytes, s3_key, thumbnail_s3_keys, 
                upload_status, processing_status, created_at, updated_at, deleted_at
@@ -170,10 +184,6 @@ func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) 
         WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL`
 
 	avatar := &model.Avatar{}
-	var (
-		thumbnailsBytes []byte
-		deletedAtPtr    *time.Time
-	)
 
 	err := s.db.QueryRowContext(ctx, query, avatarID, userID).Scan(
 		&avatar.ID,
@@ -204,12 +214,13 @@ func (s *PGStorage) GetAvatarByID(ctx context.Context, avatarID, userID string) 
 		}
 	}
 
-	// Handle nullable deleted_at
 	avatar.DeletedAt = deletedAtPtr
 
 	return avatar, nil
 }
 
+// SoftDeleteAvatar marks avatar as deleted (soft delete).
+// Clears thumbnails, sets deleted_at timestamp.
 func (s *PGStorage) SoftDeleteAvatar(ctx context.Context, avatarID, userID string) error {
 	_, err := s.db.ExecContext(ctx, `
         UPDATE avatars 
@@ -222,12 +233,14 @@ func (s *PGStorage) SoftDeleteAvatar(ctx context.Context, avatarID, userID strin
 	return err
 }
 
+// UpdateProcessingStatus updates avatar processing operation status.
 func (s *PGStorage) UpdateProcessingStatus(ctx context.Context, avatarID string, status model.ProcessingOp) error {
+	var id string
+
 	query := `
         UPDATE avatars SET processing_status = $1, updated_at = NOW()
         WHERE id = $2 AND deleted_at IS NULL RETURNING id`
 
-	var id string
 	err := s.db.QueryRowContext(ctx, query, status, avatarID).Scan(&id)
 	if err != nil {
 		return err
@@ -236,12 +249,14 @@ func (s *PGStorage) UpdateProcessingStatus(ctx context.Context, avatarID string,
 	return nil
 }
 
+// SetThumbnailsData stores thumbnails metadata as JSONB and marks processing complete.
 func (s *PGStorage) SetThumbnailsData(ctx context.Context, avatarID string, avatarThumbnails []byte) error {
+	var id string
+
 	query := `
         UPDATE avatars SET thumbnail_s3_keys = $1::jsonb, processing_status = 'completed', updated_at = NOW()
         WHERE id = $2 AND deleted_at IS NULL RETURNING id`
 
-	var id string
 	err := s.db.QueryRowContext(ctx, query, avatarThumbnails, avatarID).Scan(&id)
 
 	if err != nil {
