@@ -29,17 +29,12 @@ func NewPublisher(lg *zap.SugaredLogger, url string) (*Publisher, error) {
 	if err != nil {
 		return nil, err
 	}
-	//defer conn.Close()
 
-	// Создание канала для работы с очередями и сообщениями
-	// Канал — это виртуальное соединение внутри TCP-соединения
 	ch, err := conn.Channel()
 	if err != nil {
 		return nil, err
 	}
-	//defer ch.Close()
 
-	// Включаем режим подтверждений публикаций
 	if err := ch.Confirm(false); err != nil {
 		log.Fatalf("enable confirms: %v", err)
 	}

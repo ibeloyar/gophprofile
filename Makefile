@@ -12,7 +12,7 @@ DB_MIGRATIONS_PATH="./migrations"
 
 ## golangci-lint
 GO_LINT_VERSION := $(shell curl -s https://api.github.com/repos/golangci/golangci-lint/releases/latest | jq -r '.tag_name')
-ifeq ($(GO_LINT_VERSION),null) # в случае если запрос нарвется на rate limit
+ifeq ($(GO_LINT_VERSION),null) # in case the request hits the rate limit
 	GO_LINT_VERSION := 2.8.0
 else
 	GO_LINT_VERSION := $(shell echo $(GO_LINT_VERSION) | cut -c 2-)
@@ -69,12 +69,16 @@ test_cover:
 	go tool cover -func=coverage.filtered.out
 	rm coverage.out coverage.filtered.out
 
-#.PHONY: mock
-#mock:
-#	@echo "Generating mock for Storage..."
-#	mockgen -destination=internal/repository/pgstorage/mocks/pgstorage_mock.go -package=pgstorage -source=internal/service/service.go Storage
-#	@echo "Generating mock for Service..."
-#	mockgen -destination=internal/service/mocks/service_mock.go -package=service -source=internal/controller/grpc/grpc.go Service
+.PHONY: mock
+mock:
+	@echo "Generating mock for Storage..."
+	mockgen -destination=internal/repository/storage/mocks/pg_mock.go -package=pg -source=internal/service/service.go Storage
+	@echo "Generating mock for S3Storage..."
+	mockgen -destination=internal/repository/s3/mocks/s3_mock.go -package=s3 -source=internal/service/service.go S3Storage
+	@echo "Generating mock for Publisher..."
+	mockgen -destination=internal/repository/broker/mocks/publisher_mock.go -package=broker -source=internal/service/service.go Publisher
+	@echo "Generating mock for Service..."
+	mockgen -destination=internal/service/mocks/service_mock.go -package=service -source=internal/controller/controller.go Service
 
 .PHONY: gofmt
 gofmt:

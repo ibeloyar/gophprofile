@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"log"
 	"net/http"
 	"net/http/httptest"
@@ -159,4 +161,74 @@ func TestWriteJSON_MarshalError(t *testing.T) {
 	assert.Equal(t, "text/plain; charset=utf-8", w.Header().Get("Content-Type"))
 
 	assert.Contains(t, w.Body.String(), "Internal Server Error")
+}
+
+func TestReadAvatarFile_HeaderSizeTooLarge(t *testing.T) {
+	body := strings.NewReader("--boundary\r\n" +
+		`Content-Disposition: form-data; name="file"; filename="big.jpg"` + "\r\n" +
+		"Content-Type: image/jpeg\r\n" +
+		"\r\n" +
+		string(make([]byte, maxFileSize+1)) +
+		"\r\n--boundary--\r\n",
+	)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		body,
+	)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=boundary")
+
+	req.ParseMultipartForm(maxFileSize + 100)
+
+	avatarFile, err := readAvatarFile(req)
+	require.Error(t, err)
+	assert.Nil(t, avatarFile)
+	assert.Equal(t, ErrFileTooLarge, err)
+}
+
+func TestReadAvatarFile_InvalidContentType(t *testing.T) {
+	body := strings.NewReader("--boundary\r\n" +
+		`Content-Disposition: form-data; name="file"; filename="test.txt"` + "\r\n" +
+		"Content-Type: text/plain\r\n" +
+		"\r\n" +
+		"some text data" +
+		"\r\n--boundary--\r\n",
+	)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		body,
+	)
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=boundary")
+	req.ParseMultipartForm(10 << 20) // 10 MiB
+
+	avatarFile, err := readAvatarFile(req)
+	require.Error(t, err)
+	assert.Nil(t, avatarFile)
+	assert.Equal(t, ErrFileInvalidFormat, err)
+}
+
+func TestGetDimensions_ValidPNG(t *testing.T) {
+	// PNG 500x200
+	img := image.NewRGBA(image.Rect(0, 0, 500, 200))
+	buf := new(bytes.Buffer)
+	err := png.Encode(buf, img)
+	require.NoError(t, err)
+
+	r := bytes.NewReader(buf.Bytes())
+
+	dim, err := getDimensions(r)
+	require.NoError(t, err)
+	assert.Equal(t, 500, dim.Width)
+	assert.Equal(t, 200, dim.Height)
+}
+
+func TestGetDimensions_EmptyReader(t *testing.T) {
+	r := bytes.NewReader(nil)
+
+	dim, err := getDimensions(r)
+	require.Error(t, err)
+	assert.Nil(t, dim)
 }
