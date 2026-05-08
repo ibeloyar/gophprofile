@@ -128,7 +128,7 @@ func (s *Service) UploadAvatar(
 		UserID:   userID,
 		S3Key:    objectKey,
 	}); err != nil {
-		return nil, errors.New("failed to s3 upload avatar")
+		return nil, errors.New("failed to publish upload avatar")
 	}
 
 	return avatar, nil
