@@ -23,6 +23,7 @@ can request the avatar via the user's email address.
 **Fill in .env as in .env.example** and run containers
 
 ```terminaloutput
+make build
 make up
 ```
 
