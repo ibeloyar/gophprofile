@@ -1,5 +1,62 @@
 # Gophprofile
 
+**GophProfile** is a service for managing user avatars. 
+Users upload their photo once, and any third-party platforms (blogs, forums, comment services, etc.) 
+can request the avatar via the user's email address.
+
+### Tech Stack
+
+| Component | Technology |
+|-----------|------------|
+| **Language** | Go 1.25 |
+| **HTTP Framework** | Echo / Chi |
+| **Database** | PostgreSQL 16 |
+| **File Storage** | MinIO (S3-compatible) |
+| **Message Broker** | RabbitMQ |
+| **Migrations** | golang-migrate |
+| **Testing** | testify, sqlmock, testcontainers |
+| **Containerization** | Docker, Docker Compose |
+| **Linter** | golangci-lint |
+
+## Get started
+
+**Fill in .env as in .env.example** and run containers
+
+```terminaloutput
+make up
+```
+
+The application will be available:
+- API: http://localhost:8080
+- MinIO Console: http://localhost:9001 (miniouser/miniopass)
+- RabbitMQ Management: http://localhost:15672 (rabbituser/rabbitpass)
+
+### Development
+Make available commands
+```
+command                | description
+====================================================
+install-tools          | install mock/migrate tools
+mock                   | generate mocks
+migrate-up             | apply DB migrations
+migrate-down           | rollback migration
+migrate-create         | create migration (NAME=...)
+test                   | run tests
+test_cover             | tests + coverage report
+gofmt                  | format all Go files
+up                     | run docker compose up -d
+down                   | run docker compose down
+build                  | build docker images
+```
+
+### Docker Compose
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **app** | 8080 | server + worker |
+| **postgres** | 5432 | Database |
+| **rabbitmq** | 5672, 15672 | RabbitMQ broker |
+| **minio** | 9000, 9001 | MinIO (S3) |
 
 
 ### Last test cover
