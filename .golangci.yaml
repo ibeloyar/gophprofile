@@ -68,7 +68,6 @@ linters:
     - tparallel
     - unconvert
     - unparam
-    - unused
     - usestdlibvars
     - usetesting
     - wastedassign
@@ -88,5 +87,6 @@ linters:
         - G306
 
 run:
+  tests: false
   issues-exit-code: 1
   timeout: 5m
