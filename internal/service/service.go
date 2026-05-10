@@ -14,6 +14,13 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	ErrFailedDBCreateAvatar      = errors.New("failed db create avatar")
+	ErrFailedS3UploadAvatar      = errors.New("failed to s3 upload avatar")
+	ErrFailedStorageUpdateS3Key  = errors.New("failed to storage update S3 key")
+	ErrFailedPublishUploadAvatar = errors.New("failed to publish upload avatar")
+)
+
 //nolint:lll
 type Storage interface {
 	Health() error
@@ -109,18 +116,18 @@ func (s *Service) UploadAvatar(
 		avatarFile.Width, avatarFile.Height, avatarFile.Size,
 	)
 	if err != nil {
-		return nil, errors.New("failed db create avatar")
+		return nil, ErrFailedDBCreateAvatar
 	}
 
 	objectKey := fmt.Sprintf("%s/%s", userID, avatar.ID)
 
 	err = s.s3.Upload(ctx, objectKey, avatarFile.ContentType, avatarFile.Data)
 	if err != nil {
-		return nil, errors.New("failed to s3 upload avatar")
+		return nil, ErrFailedS3UploadAvatar
 	}
 
 	if err := s.storage.UpdateAvatarS3Key(ctx, avatar.ID.String(), objectKey); err != nil {
-		return nil, errors.New("failed to storage update S3 key")
+		return nil, ErrFailedStorageUpdateS3Key
 	}
 
 	if err := s.publisher.PublishUpload(ctx, &model.AvatarUploadEvent{
@@ -128,7 +135,7 @@ func (s *Service) UploadAvatar(
 		UserID:   userID,
 		S3Key:    objectKey,
 	}); err != nil {
-		return nil, errors.New("failed to publish upload avatar")
+		return nil, ErrFailedPublishUploadAvatar
 	}
 
 	return avatar, nil

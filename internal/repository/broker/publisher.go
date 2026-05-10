@@ -85,7 +85,7 @@ func (p *Publisher) Shutdown() error {
 // PublishUpload publishes avatar upload event to 'avatars.exchange' with upload routing key.
 // Message is persistent and confirmed before return.
 func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUploadEvent) error {
-	event.MessageID = uuid.New().String()
+	event.MessageID = uuid.NewString()
 
 	body, err := json.Marshal(event)
 	if err != nil {
@@ -107,7 +107,7 @@ func (p *Publisher) PublishUpload(ctx context.Context, event *model.AvatarUpload
 // PublishDelete publishes avatar delete event to 'avatars.exchange' with delete routing key.
 // Message is persistent and confirmed before return.
 func (p *Publisher) PublishDelete(ctx context.Context, event *model.AvatarDeleteEvent) error {
-	event.MessageID = uuid.New().String()
+	event.MessageID = uuid.NewString()
 
 	body, err := json.Marshal(event)
 	if err != nil {
